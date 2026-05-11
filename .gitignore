@@ -1,3 +1,6 @@
+/comfyui_controlnet_aux/
+/vendor/comfyui_controlnet_aux/ckpts/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

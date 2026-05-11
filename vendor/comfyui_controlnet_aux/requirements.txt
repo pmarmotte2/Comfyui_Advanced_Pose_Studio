@@ -1,0 +1,12 @@
+torch
+huggingface_hub
+scipy
+opencv-python
+filelock
+numpy
+Pillow
+einops
+torchvision
+pyyaml
+scikit-image
+matplotlib

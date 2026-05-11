@@ -3265,6 +3265,36 @@ class PoseStudioWidget {
         this.qwenMultiAngleProgressJobId = null;
     }
 
+    startOpenPoseProgressPolling(jobId) {
+        this.stopOpenPoseProgressPolling();
+        this.openPoseProgressJobId = jobId;
+        const poll = async () => {
+            if (this.openPoseProgressJobId !== jobId) return;
+            try {
+                const res = await fetch(`/advanced_pose_studio/openpose_progress/${encodeURIComponent(jobId)}`);
+                if (!res.ok) return;
+                const state = await res.json();
+                if (this.openPoseProgressJobId !== jobId) return;
+                if (state?.message) {
+                    const pct = Number.isFinite(Number(state.percent)) ? ` ${Math.round(Number(state.percent))}%` : "";
+                    this.setPoseInitializerBusy(true, `${state.message}${pct}`);
+                }
+            } catch (_) {
+                // Progress polling is best-effort; detection continues without it.
+            }
+        };
+        poll();
+        this.openPoseProgressTimer = setInterval(poll, 750);
+    }
+
+    stopOpenPoseProgressPolling() {
+        if (this.openPoseProgressTimer) {
+            clearInterval(this.openPoseProgressTimer);
+            this.openPoseProgressTimer = null;
+        }
+        this.openPoseProgressJobId = null;
+    }
+
     async buildMultiAnglePoseInitializerViews(originalImage, originalDataUrl) {
         const views = [{
             label: "Original",
@@ -4088,11 +4118,18 @@ class PoseStudioWidget {
     }
 
     async detectOpenPoseFromImageDataUrl(dataUrl) {
-        const res = await fetch("/advanced_pose_studio/openpose_from_image", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: dataUrl, resolution: 512 })
-        });
+        const jobId = `advanced_pose_studio_openpose_${this.node?.id || "node"}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        this.startOpenPoseProgressPolling(jobId);
+        let res = null;
+        try {
+            res = await fetch("/advanced_pose_studio/openpose_from_image", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ job_id: jobId, image: dataUrl, resolution: 512 })
+            });
+        } finally {
+            this.stopOpenPoseProgressPolling();
+        }
 
         let payload = null;
         try {
@@ -4891,8 +4928,9 @@ class PoseStudioWidget {
                     body: JSON.stringify(mesh)
                 });
                 const data = await res.json();
+                const sourceName = character.name || character.NAME || "";
                 const metadata = {
-                    name: character.name || character.NAME || "Character",
+                    name: /^Character\s*\d*$/i.test(sourceName) ? `Character ${i + 1}` : (sourceName || `Character ${i + 1}`),
                     image: character.image || null,
                     meshParams: mesh
                 };
@@ -4926,23 +4964,30 @@ class PoseStudioWidget {
                     body: JSON.stringify(mesh)
                 });
                 const data = await res.json();
+                const sourceName = character.name || "";
+                const restoredId = /^character_\d+$/i.test(character.id || "") ? `character_${i + 1}` : (character.id || null);
                 const metadata = {
-                    name: character.name || `Character ${i + 1}`,
+                    id: restoredId,
+                    name: /^Character\s*\d+$/i.test(sourceName) ? `Character ${i + 1}` : (sourceName || `Character ${i + 1}`),
                     image: character.image || null,
                     meshParams: mesh
                 };
 
                 if (i === 0) {
                     this.viewer.loadData(data, true, metadata);
+                    const loadedId = this.viewer.getActiveCharacterId?.();
+                    if (loadedId) {
+                        if (character.id) idMap[character.id] = loadedId;
+                        restored.push({ saved: character, loadedId });
+                    }
                 } else {
-                    this.viewer.addCharacterData(data, metadata);
-                }
-
-                const summary = this.viewer.getCharacterSummary?.() || [];
-                const loaded = summary[summary.length - 1];
-                if (loaded) {
-                    if (character.id) idMap[character.id] = loaded.id;
-                    restored.push({ saved: character, loadedId: loaded.id });
+                    const loadedId = this.viewer.addCharacterData(data, metadata);
+                    if (loadedId) {
+                        if (character.id) idMap[character.id] = loadedId;
+                        restored.push({ saved: character, loadedId });
+                    } else {
+                        console.warn("[Advanced Pose Studio] Skipped character restore because mesh data could not be loaded:", character);
+                    }
                 }
             }
 

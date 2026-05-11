@@ -2081,7 +2081,8 @@ export class PoseViewerCore {
         }
 
         this._initIKHelpers();
-        this._registerActiveCharacter();
+        this._registerActiveCharacter(options.id || null);
+        this._syncNextSceneCharacterId();
         this._applyCharacterMetadata(this.sceneCharacters.find(c => c.id === this.activeCharacterId), options);
         this._applySceneCharacterColors();
         this.requestRender();
@@ -2117,7 +2118,7 @@ export class PoseViewerCore {
         this._createJointMarkers();
         this._initIKHelpers();
 
-        const id = `character_${this.nextSceneCharacterId++}`;
+        const id = this._allocateSceneCharacterId(options.id);
         this._registerActiveCharacter(id);
         const character = this.sceneCharacters.find(c => c.id === id);
         if (character) this._applyCharacterMetadata(character, options);
@@ -2209,6 +2210,10 @@ export class PoseViewerCore {
         return this._activateCharacter(characterId);
     }
 
+    getActiveCharacterId() {
+        return this.activeCharacterId || null;
+    }
+
     getCharacterSummary() {
         this._rememberActiveCharacter();
         return this.sceneCharacters.map((c, idx) => ({
@@ -2221,11 +2226,15 @@ export class PoseViewerCore {
 
     getSceneCharacterState() {
         this._rememberActiveCharacter();
+        const idMap = new Map();
+        this.sceneCharacters.forEach((c, idx) => {
+            idMap.set(c.id, `character_${idx + 1}`);
+        });
         return {
-            activeCharacterId: this.activeCharacterId || null,
+            activeCharacterId: idMap.get(this.activeCharacterId) || null,
             characters: this.sceneCharacters.map((c, idx) => ({
-                id: c.id,
-                name: c.name || "",
+                id: `character_${idx + 1}`,
+                name: /^Character\s*\d+$/i.test(c.name || "") ? `Character ${idx + 1}` : (c.name || ""),
                 image: c.image || null,
                 meshParams: c.meshParams || null,
                 pose: this._getPoseForCharacter(c),
@@ -2382,7 +2391,7 @@ export class PoseViewerCore {
 
     _registerActiveCharacter(id = null) {
         if (!this.skinnedMesh) return null;
-        const characterId = id || this.activeCharacterId || `character_${this.nextSceneCharacterId++}`;
+        const characterId = id || this.activeCharacterId || this._allocateSceneCharacterId();
         let character = this.sceneCharacters.find(c => c.id === characterId);
         if (!character) {
             character = { id: characterId };
@@ -2393,7 +2402,29 @@ export class PoseViewerCore {
             this.skinnedMesh.userData.sceneCharacterId = characterId;
         }
         Object.assign(character, this._activeCharacterState());
+        this._syncNextSceneCharacterId();
         return character;
+    }
+
+    _allocateSceneCharacterId(preferredId = null) {
+        if (preferredId && !this.sceneCharacters.some(c => c.id === preferredId)) {
+            return preferredId;
+        }
+        this._syncNextSceneCharacterId();
+        let id = `character_${this.nextSceneCharacterId++}`;
+        while (this.sceneCharacters.some(c => c.id === id)) {
+            id = `character_${this.nextSceneCharacterId++}`;
+        }
+        return id;
+    }
+
+    _syncNextSceneCharacterId() {
+        let maxId = 0;
+        for (const character of this.sceneCharacters || []) {
+            const match = String(character.id || "").match(/^character_(\d+)$/);
+            if (match) maxId = Math.max(maxId, Number(match[1]) || 0);
+        }
+        this.nextSceneCharacterId = Math.max(Number(this.nextSceneCharacterId) || 1, maxId + 1);
     }
 
     _rememberActiveCharacter() {

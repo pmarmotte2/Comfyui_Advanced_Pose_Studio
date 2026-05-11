@@ -287,8 +287,10 @@ def _run_node_with_prompt_context(fn):
 
 _ADVANCED_POSE_PREPROCESSOR_INSTALL_LOCK = threading.Lock()
 _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED = False
+_ADVANCED_POSE_OPENPOSE_PROGRESS = {}
 _ADVANCED_POSE_CONTROLNET_AUX_REPO = "https://github.com/Fannovel16/comfyui_controlnet_aux.git"
 _ADVANCED_POSE_CONTROLNET_AUX_DIR = "comfyui_controlnet_aux"
+_ADVANCED_POSE_VENDOR_CONTROLNET_AUX_DIR = os.path.join(os.path.dirname(__file__), "vendor", "comfyui_controlnet_aux")
 _ADVANCED_POSE_DETECTOR_NODE_NAMES = {
     "DWPreprocessor",
     "OpenposePreprocessor",
@@ -312,7 +314,85 @@ def _has_pose_preprocessor_mapping(mappings):
     return any(name in mappings for name in _ADVANCED_POSE_DETECTOR_NODE_NAMES)
 
 
-def _install_controlnet_aux_custom_node(repo_path):
+def _controlnet_aux_requirements_missing():
+    import importlib.util
+
+    required_modules = [
+        "cv2",
+        "huggingface_hub",
+        "matplotlib",
+        "scipy",
+        "skimage",
+        "torchvision",
+        "yaml",
+    ]
+    return [name for name in required_modules if importlib.util.find_spec(name) is None]
+
+
+def _controlnet_aux_candidate_paths():
+    candidates = []
+    for path in [
+        _ADVANCED_POSE_VENDOR_CONTROLNET_AUX_DIR,
+        os.path.join(os.path.dirname(__file__), _ADVANCED_POSE_CONTROLNET_AUX_DIR),
+        os.path.join(_custom_nodes_root(), _ADVANCED_POSE_CONTROLNET_AUX_DIR),
+    ]:
+        if path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def _update_openpose_progress(job_id, **kwargs):
+    if not job_id:
+        return
+    import time
+
+    state = _ADVANCED_POSE_OPENPOSE_PROGRESS.get(job_id, {})
+    if "percent" not in kwargs:
+        state.pop("percent", None)
+    state.update(kwargs)
+    state["updated_at"] = time.time()
+    _ADVANCED_POSE_OPENPOSE_PROGRESS[job_id] = state
+
+    now = time.time()
+    for key, value in list(_ADVANCED_POSE_OPENPOSE_PROGRESS.items()):
+        if now - value.get("updated_at", now) > 600:
+            _ADVANCED_POSE_OPENPOSE_PROGRESS.pop(key, None)
+
+
+def _install_openpose_progress_callback(job_id):
+    if not job_id:
+        return None
+    import builtins
+
+    previous = getattr(builtins, "ADVANCED_POSE_STUDIO_PROGRESS_CALLBACK", None)
+
+    def _callback(message, stage="downloading_model", status="running", percent=None):
+        payload = {
+            "status": status,
+            "stage": stage,
+            "message": message,
+        }
+        if percent is not None:
+            payload["percent"] = percent
+        _update_openpose_progress(job_id, **payload)
+
+    builtins.ADVANCED_POSE_STUDIO_PROGRESS_CALLBACK = _callback
+    return previous
+
+
+def _restore_openpose_progress_callback(previous):
+    import builtins
+
+    if previous is None:
+        try:
+            delattr(builtins, "ADVANCED_POSE_STUDIO_PROGRESS_CALLBACK")
+        except AttributeError:
+            pass
+    else:
+        builtins.ADVANCED_POSE_STUDIO_PROGRESS_CALLBACK = previous
+
+
+def _install_controlnet_aux_custom_node(repo_path, job_id=None):
     import subprocess
     import sys
     import zipfile
@@ -324,6 +404,12 @@ def _install_controlnet_aux_custom_node(repo_path):
         parent = os.path.dirname(repo_path)
         os.makedirs(parent, exist_ok=True)
         try:
+            _update_openpose_progress(
+                job_id,
+                status="running",
+                stage="installing_preprocessor",
+                message="Installing DWPose/OpenPose preprocessors",
+            )
             subprocess.run(
                 ["git", "clone", "--depth", "1", _ADVANCED_POSE_CONTROLNET_AUX_REPO, repo_path],
                 cwd=parent,
@@ -336,8 +422,36 @@ def _install_controlnet_aux_custom_node(repo_path):
             with tempfile.TemporaryDirectory(prefix="aps_controlnet_aux_") as tmp:
                 zip_path = os.path.join(tmp, "comfyui_controlnet_aux.zip")
                 req = urllib.request.Request(archive_url, headers={"User-Agent": "Advanced-Pose-Studio"})
+                _update_openpose_progress(
+                    job_id,
+                    status="running",
+                    stage="downloading_preprocessor",
+                    message="Downloading DWPose/OpenPose preprocessors",
+                )
                 with urllib.request.urlopen(req, timeout=120) as response, open(zip_path, "wb") as f:
-                    shutil.copyfileobj(response, f)
+                    total = int(response.headers.get("Content-Length") or 0)
+                    done = 0
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        done += len(chunk)
+                        if total:
+                            pct = round((done / total) * 100, 1)
+                            _update_openpose_progress(
+                                job_id,
+                                status="running",
+                                stage="downloading_preprocessor",
+                                message=f"Downloading DWPose/OpenPose preprocessors: {pct}%",
+                                percent=pct,
+                            )
+                _update_openpose_progress(
+                    job_id,
+                    status="running",
+                    stage="extracting_preprocessor",
+                    message="Extracting DWPose/OpenPose preprocessors",
+                )
                 with zipfile.ZipFile(zip_path) as zf:
                     zf.extractall(tmp)
                 extracted = os.path.join(tmp, "comfyui_controlnet_aux-main")
@@ -346,14 +460,20 @@ def _install_controlnet_aux_custom_node(repo_path):
                 shutil.move(extracted, repo_path)
 
     requirements = os.path.join(repo_path, "requirements.txt")
-    if os.path.isfile(requirements):
+    if os.path.isfile(requirements) and _controlnet_aux_requirements_missing():
+        _update_openpose_progress(
+            job_id,
+            status="running",
+            stage="installing_requirements",
+            message="Installing DWPose/OpenPose Python requirements",
+        )
         subprocess.run(
             [sys.executable, "-s", "-m", "pip", "install", "-r", requirements],
             check=True,
         )
 
 
-def _load_controlnet_aux_mappings(repo_path, comfy_nodes):
+def _load_controlnet_aux_mappings(repo_path, comfy_nodes, job_id=None):
     import importlib.util
     import sys
 
@@ -364,10 +484,19 @@ def _load_controlnet_aux_mappings(repo_path, comfy_nodes):
     parent = os.path.dirname(repo_path)
     if parent not in sys.path:
         sys.path.insert(0, parent)
+    src_path = os.path.join(repo_path, "src")
+    if os.path.isdir(src_path) and src_path not in sys.path:
+        sys.path.insert(0, src_path)
 
     package_name = _ADVANCED_POSE_CONTROLNET_AUX_DIR
     module = sys.modules.get(package_name)
     if module is None:
+        _update_openpose_progress(
+            job_id,
+            status="running",
+            stage="loading_preprocessor",
+            message="Loading DWPose/OpenPose preprocessors",
+        )
         spec = importlib.util.spec_from_file_location(
             package_name,
             init_path,
@@ -381,15 +510,40 @@ def _load_controlnet_aux_mappings(repo_path, comfy_nodes):
 
     node_mappings = getattr(module, "NODE_CLASS_MAPPINGS", {}) or {}
     display_mappings = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {}
+    if not _has_pose_preprocessor_mapping(node_mappings):
+        node_mappings = {}
+        display_mappings = {}
+        for wrapper_name in ["dwpose", "openpose"]:
+            wrapper_module_name = f"{package_name}.node_wrappers.{wrapper_name}"
+            wrapper = sys.modules.get(wrapper_module_name)
+            if wrapper is None:
+                wrapper_path = os.path.join(repo_path, "node_wrappers", f"{wrapper_name}.py")
+                if not os.path.isfile(wrapper_path):
+                    continue
+                spec = importlib.util.spec_from_file_location(wrapper_module_name, wrapper_path)
+                if spec is None or spec.loader is None:
+                    continue
+                wrapper = importlib.util.module_from_spec(spec)
+                sys.modules[wrapper_module_name] = wrapper
+                spec.loader.exec_module(wrapper)
+            node_mappings.update(getattr(wrapper, "NODE_CLASS_MAPPINGS", {}) or {})
+            display_mappings.update(getattr(wrapper, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {})
+
     getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}).update(node_mappings)
     if hasattr(comfy_nodes, "NODE_DISPLAY_NAME_MAPPINGS"):
         comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(display_mappings)
     return _has_pose_preprocessor_mapping(getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {})
 
 
-def _ensure_pose_preprocessors_available(comfy_nodes):
+def _ensure_pose_preprocessors_available(comfy_nodes, job_id=None):
     global _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED
 
+    _update_openpose_progress(
+        job_id,
+        status="running",
+        stage="checking_preprocessors",
+        message="Checking DWPose/OpenPose preprocessors",
+    )
     mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
     if _has_pose_preprocessor_mapping(mappings):
         return
@@ -399,86 +553,107 @@ def _ensure_pose_preprocessors_available(comfy_nodes):
         if _has_pose_preprocessor_mapping(mappings):
             return
 
-        custom_nodes = _custom_nodes_root()
-        repo_path = os.path.join(custom_nodes, _ADVANCED_POSE_CONTROLNET_AUX_DIR)
+        repo_path = None
+        for candidate in _controlnet_aux_candidate_paths():
+            if os.path.isdir(candidate):
+                repo_path = candidate
+                break
+        if repo_path is None:
+            repo_path = os.path.join(_custom_nodes_root(), _ADVANCED_POSE_CONTROLNET_AUX_DIR)
 
         if not os.path.isdir(repo_path) or not _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED:
             _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED = True
-            _install_controlnet_aux_custom_node(repo_path)
+            _install_controlnet_aux_custom_node(repo_path, job_id=job_id)
 
-        if not _load_controlnet_aux_mappings(repo_path, comfy_nodes):
+        if not _load_controlnet_aux_mappings(repo_path, comfy_nodes, job_id=job_id):
             raise RuntimeError(
                 "Installed comfyui_controlnet_aux, but ComfyUI did not register DWPose/OpenPose nodes. "
                 "Restart ComfyUI once so the new custom node can finish loading."
             )
 
 
-def _run_comfy_openpose_detector(image_tensor, resolution=512):
+def _run_comfy_openpose_detector(image_tensor, resolution=512, job_id=None):
     try:
         import nodes as comfy_nodes
     except Exception as e:
         raise RuntimeError(f"ComfyUI node registry unavailable: {e}") from e
 
-    _ensure_pose_preprocessors_available(comfy_nodes)
+    _ensure_pose_preprocessors_available(comfy_nodes, job_id=job_id)
     mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
     attempts = []
 
     def _run():
-        detector_specs = [
-            ("DWPreprocessor", {
-                "detect_hand": "enable",
-                "detect_body": "enable",
-                "detect_face": "enable",
-                "resolution": resolution,
-                "bbox_detector": "yolox_l.onnx",
-                "pose_estimator": "dw-ll_ucoco_384.onnx",
-            }),
-            ("AIO_Preprocessor", {
-                "preprocessor": "dw_openpose_full",
-                "resolution": resolution,
-            }),
-            ("OpenposePreprocessor", {
-                "detect_hand": "enable",
-                "detect_body": "enable",
-                "detect_face": "enable",
-                "resolution": resolution,
-            }),
-            ("AIO_Preprocessor", {
-                "preprocessor": "openpose_full",
-                "resolution": resolution,
-            }),
-        ]
+        progress_callback = _install_openpose_progress_callback(job_id)
+        try:
+            detector_specs = [
+                ("DWPreprocessor", {
+                    "detect_hand": "enable",
+                    "detect_body": "enable",
+                    "detect_face": "enable",
+                    "resolution": resolution,
+                    "bbox_detector": "yolox_l.onnx",
+                    "pose_estimator": "dw-ll_ucoco_384.onnx",
+                }),
+                ("AIO_Preprocessor", {
+                    "preprocessor": "dw_openpose_full",
+                    "resolution": resolution,
+                }),
+                ("OpenposePreprocessor", {
+                    "detect_hand": "enable",
+                    "detect_body": "enable",
+                    "detect_face": "enable",
+                    "resolution": resolution,
+                }),
+                ("AIO_Preprocessor", {
+                    "preprocessor": "openpose_full",
+                    "resolution": resolution,
+                }),
+            ]
 
-        for node_name, kwargs in detector_specs:
-            cls = mappings.get(node_name)
-            if cls is None:
-                attempts.append(f"{node_name}: not installed")
-                continue
+            for node_name, kwargs in detector_specs:
+                cls = mappings.get(node_name)
+                if cls is None:
+                    attempts.append(f"{node_name}: not installed")
+                    continue
 
-            try:
-                node = cls()
-                fn = getattr(node, getattr(cls, "FUNCTION", "estimate_pose"))
-                result = fn(image=image_tensor, **kwargs)
-                payload = _extract_openpose_payload(result)
-                if payload:
-                    return payload, node_name
-                attempts.append(f"{node_name}: no keypoints returned")
-            except TypeError:
                 try:
-                    minimal = {k: v for k, v in kwargs.items() if k in {"detect_hand", "detect_body", "detect_face", "resolution"}}
+                    _update_openpose_progress(
+                        job_id,
+                        status="running",
+                        stage="detecting_pose",
+                        message=f"Detecting skeleton with {node_name}",
+                    )
                     node = cls()
                     fn = getattr(node, getattr(cls, "FUNCTION", "estimate_pose"))
-                    result = fn(image=image_tensor, **minimal)
+                    result = fn(image=image_tensor, **kwargs)
                     payload = _extract_openpose_payload(result)
                     if payload:
                         return payload, node_name
                     attempts.append(f"{node_name}: no keypoints returned")
+                except TypeError:
+                    try:
+                        _update_openpose_progress(
+                            job_id,
+                            status="running",
+                            stage="detecting_pose",
+                            message=f"Detecting skeleton with {node_name}",
+                        )
+                        minimal = {k: v for k, v in kwargs.items() if k in {"detect_hand", "detect_body", "detect_face", "resolution"}}
+                        node = cls()
+                        fn = getattr(node, getattr(cls, "FUNCTION", "estimate_pose"))
+                        result = fn(image=image_tensor, **minimal)
+                        payload = _extract_openpose_payload(result)
+                        if payload:
+                            return payload, node_name
+                        attempts.append(f"{node_name}: no keypoints returned")
+                    except Exception as e:
+                        attempts.append(f"{node_name}: {e}")
                 except Exception as e:
                     attempts.append(f"{node_name}: {e}")
-            except Exception as e:
-                attempts.append(f"{node_name}: {e}")
 
-        raise RuntimeError("; ".join(attempts) or "no OpenPose detector available")
+            raise RuntimeError("; ".join(attempts) or "no OpenPose detector available")
+        finally:
+            _restore_openpose_progress_callback(progress_callback)
 
     return _run_node_with_prompt_context(_run)
 
@@ -638,24 +813,59 @@ def _advanced_pose_register_pose_studio_openpose():
     except Exception:
         return
 
+    @PromptServer.instance.routes.get("/advanced_pose_studio/openpose_progress/{job_id}")
+    async def advanced_pose_studio_openpose_progress(request):
+        job_id = request.match_info["job_id"]
+        state = _ADVANCED_POSE_OPENPOSE_PROGRESS.get(job_id)
+        if not state:
+            return web.json_response({"status": "idle", "message": ""})
+        return web.json_response(state)
+
     @PromptServer.instance.routes.post("/advanced_pose_studio/openpose_from_image")
     async def advanced_pose_studio_openpose_from_image(request):
         try:
+            import asyncio
+
             data = await request.json()
+            job_id = data.get("job_id")
             resolution = int(data.get("resolution", 512))
             resolution = max(64, min(2048, resolution))
-            image = _decode_data_url_image(data.get("image"))
-            tensor = _pil_to_comfy_image_tensor(image)
-            openpose_payload, detector = _run_comfy_openpose_detector(tensor, resolution=resolution)
-            depth_samples = {}
-            depth_detector = None
-            depth_error = None
-            try:
-                depth_tensor, depth_detector = _run_comfy_depth_detector(tensor, resolution=resolution)
-                depth_samples = _sample_openpose_joint_depths(openpose_payload, depth_tensor)
-            except Exception as depth_exc:
-                depth_error = str(depth_exc)
 
+            def _detect():
+                _update_openpose_progress(
+                    job_id,
+                    status="running",
+                    stage="preparing",
+                    message="Preparing image for skeleton detection",
+                )
+                image = _decode_data_url_image(data.get("image"))
+                tensor = _pil_to_comfy_image_tensor(image)
+                openpose_payload, detector = _run_comfy_openpose_detector(tensor, resolution=resolution, job_id=job_id)
+                depth_samples = {}
+                depth_detector = None
+                depth_error = None
+                try:
+                    _update_openpose_progress(
+                        job_id,
+                        status="running",
+                        stage="detecting_depth",
+                        message="Sampling depth for detected skeleton",
+                    )
+                    depth_tensor, depth_detector = _run_comfy_depth_detector(tensor, resolution=resolution)
+                    depth_samples = _sample_openpose_joint_depths(openpose_payload, depth_tensor)
+                except Exception as depth_exc:
+                    depth_error = str(depth_exc)
+
+                _update_openpose_progress(
+                    job_id,
+                    status="complete",
+                    stage="complete",
+                    message="Skeleton detection complete",
+                    percent=100,
+                )
+                return openpose_payload, detector, depth_detector, depth_samples, depth_error
+
+            openpose_payload, detector, depth_detector, depth_samples, depth_error = await asyncio.to_thread(_detect)
             return web.json_response({
                 "status": "ok",
                 "detector": detector,
@@ -667,6 +877,12 @@ def _advanced_pose_register_pose_studio_openpose():
         except Exception as e:
             import traceback
             traceback.print_exc()
+            _update_openpose_progress(
+                data.get("job_id") if "data" in locals() else None,
+                status="error",
+                stage="error",
+                message=str(e),
+            )
             return web.json_response({"error": str(e)}, status=500)
 
 

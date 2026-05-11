@@ -23,6 +23,7 @@ __all__ = [
 # === API Endpoint Registration for Pose Studio ===
 import os
 import numpy as np
+import threading
 
 def _advanced_pose_register_endpoint():
     """Lazy registration to avoid import errors in analysis tools."""
@@ -284,12 +285,141 @@ def _run_node_with_prompt_context(fn):
                 pass
 
 
+_ADVANCED_POSE_PREPROCESSOR_INSTALL_LOCK = threading.Lock()
+_ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED = False
+_ADVANCED_POSE_CONTROLNET_AUX_REPO = "https://github.com/Fannovel16/comfyui_controlnet_aux.git"
+_ADVANCED_POSE_CONTROLNET_AUX_DIR = "comfyui_controlnet_aux"
+_ADVANCED_POSE_DETECTOR_NODE_NAMES = {
+    "DWPreprocessor",
+    "OpenposePreprocessor",
+    "AIO_Preprocessor",
+}
+
+
+def _custom_nodes_root():
+    try:
+        import folder_paths
+
+        paths = folder_paths.get_folder_paths("custom_nodes")
+        if paths:
+            return paths[0]
+    except Exception:
+        pass
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _has_pose_preprocessor_mapping(mappings):
+    return any(name in mappings for name in _ADVANCED_POSE_DETECTOR_NODE_NAMES)
+
+
+def _install_controlnet_aux_custom_node(repo_path):
+    import subprocess
+    import sys
+    import zipfile
+    import tempfile
+    import shutil
+    import urllib.request
+
+    if not os.path.isdir(repo_path):
+        parent = os.path.dirname(repo_path)
+        os.makedirs(parent, exist_ok=True)
+        try:
+            subprocess.run(
+                ["git", "clone", "--depth", "1", _ADVANCED_POSE_CONTROLNET_AUX_REPO, repo_path],
+                cwd=parent,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            archive_url = "https://github.com/Fannovel16/comfyui_controlnet_aux/archive/refs/heads/main.zip"
+            with tempfile.TemporaryDirectory(prefix="aps_controlnet_aux_") as tmp:
+                zip_path = os.path.join(tmp, "comfyui_controlnet_aux.zip")
+                req = urllib.request.Request(archive_url, headers={"User-Agent": "Advanced-Pose-Studio"})
+                with urllib.request.urlopen(req, timeout=120) as response, open(zip_path, "wb") as f:
+                    shutil.copyfileobj(response, f)
+                with zipfile.ZipFile(zip_path) as zf:
+                    zf.extractall(tmp)
+                extracted = os.path.join(tmp, "comfyui_controlnet_aux-main")
+                if not os.path.isdir(extracted):
+                    raise RuntimeError("Downloaded comfyui_controlnet_aux archive did not contain the expected folder.")
+                shutil.move(extracted, repo_path)
+
+    requirements = os.path.join(repo_path, "requirements.txt")
+    if os.path.isfile(requirements):
+        subprocess.run(
+            [sys.executable, "-s", "-m", "pip", "install", "-r", requirements],
+            check=True,
+        )
+
+
+def _load_controlnet_aux_mappings(repo_path, comfy_nodes):
+    import importlib.util
+    import sys
+
+    init_path = os.path.join(repo_path, "__init__.py")
+    if not os.path.isfile(init_path):
+        return False
+
+    parent = os.path.dirname(repo_path)
+    if parent not in sys.path:
+        sys.path.insert(0, parent)
+
+    package_name = _ADVANCED_POSE_CONTROLNET_AUX_DIR
+    module = sys.modules.get(package_name)
+    if module is None:
+        spec = importlib.util.spec_from_file_location(
+            package_name,
+            init_path,
+            submodule_search_locations=[repo_path],
+        )
+        if spec is None or spec.loader is None:
+            return False
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
+
+    node_mappings = getattr(module, "NODE_CLASS_MAPPINGS", {}) or {}
+    display_mappings = getattr(module, "NODE_DISPLAY_NAME_MAPPINGS", {}) or {}
+    getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}).update(node_mappings)
+    if hasattr(comfy_nodes, "NODE_DISPLAY_NAME_MAPPINGS"):
+        comfy_nodes.NODE_DISPLAY_NAME_MAPPINGS.update(display_mappings)
+    return _has_pose_preprocessor_mapping(getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {})
+
+
+def _ensure_pose_preprocessors_available(comfy_nodes):
+    global _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED
+
+    mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
+    if _has_pose_preprocessor_mapping(mappings):
+        return
+
+    with _ADVANCED_POSE_PREPROCESSOR_INSTALL_LOCK:
+        mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
+        if _has_pose_preprocessor_mapping(mappings):
+            return
+
+        custom_nodes = _custom_nodes_root()
+        repo_path = os.path.join(custom_nodes, _ADVANCED_POSE_CONTROLNET_AUX_DIR)
+
+        if not os.path.isdir(repo_path) or not _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED:
+            _ADVANCED_POSE_PREPROCESSOR_INSTALL_ATTEMPTED = True
+            _install_controlnet_aux_custom_node(repo_path)
+
+        if not _load_controlnet_aux_mappings(repo_path, comfy_nodes):
+            raise RuntimeError(
+                "Installed comfyui_controlnet_aux, but ComfyUI did not register DWPose/OpenPose nodes. "
+                "Restart ComfyUI once so the new custom node can finish loading."
+            )
+
+
 def _run_comfy_openpose_detector(image_tensor, resolution=512):
     try:
         import nodes as comfy_nodes
     except Exception as e:
         raise RuntimeError(f"ComfyUI node registry unavailable: {e}") from e
 
+    _ensure_pose_preprocessors_available(comfy_nodes)
     mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}) or {}
     attempts = []
 
@@ -303,10 +433,18 @@ def _run_comfy_openpose_detector(image_tensor, resolution=512):
                 "bbox_detector": "yolox_l.onnx",
                 "pose_estimator": "dw-ll_ucoco_384.onnx",
             }),
+            ("AIO_Preprocessor", {
+                "preprocessor": "dw_openpose_full",
+                "resolution": resolution,
+            }),
             ("OpenposePreprocessor", {
                 "detect_hand": "enable",
                 "detect_body": "enable",
                 "detect_face": "enable",
+                "resolution": resolution,
+            }),
+            ("AIO_Preprocessor", {
+                "preprocessor": "openpose_full",
                 "resolution": resolution,
             }),
         ]

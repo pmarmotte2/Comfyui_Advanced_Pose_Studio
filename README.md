@@ -63,6 +63,7 @@ Core mesh posing uses the included MakeHuman data in `CharacterData/`.
 OpenPose initialization uses installed ComfyUI preprocessors when available:
 
 - DWPose is preferred when installed.
+- If no compatible pose preprocessor is registered, the node installs `comfyui_controlnet_aux` into `custom_nodes` and attempts to load it for the current session.
 - OpenPose is used as fallback when available.
 - Depth preprocessors are sampled when available to improve pose transfer.
 

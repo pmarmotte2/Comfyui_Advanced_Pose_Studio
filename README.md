@@ -1,88 +1,89 @@
-# ComfyUI VNCCS Utils
+# Advanced Pose Studio
 
-A collection of utility nodes from the [VNCCS](https://github.com/AHEKOT/ComfyUI_VNCCS) project that are useful not only for the project's primary goals but also for everyday ComfyUI workflows.
+Advanced Pose Studio is a standalone ComfyUI custom node for staging MakeHuman-based character meshes, editing poses, and exporting viewport-aligned pose renders.
 
----
-<a href="https://discord.com/invite/9Dacp4wvQw" target="_blank"><img src="https://img.shields.io/badge/Join%20our%20Discord-7289DA?style=for-the-badge&logo=discord&logoColor=white" style="height: 60px !important;"></a>
+## Node
 
----
+- Node id: `Advanced_Pose_Studio`
+- Display name: `Advanced Pose Studio`
+- Category: `Advanced Pose Studio`
 
-## **If you find my project useful, please consider supporting it! I work on it completely on my own, and your support will allow me to continue maintaining it and adding even more cool features!**
+## Inputs
 
-<a href="https://www.buymeacoffee.com/MIUProject" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+- `pose_data`: internal serialized scene state managed by the node UI.
+- `characters_json` optional input: creates up to four scene characters from a character roster JSON.
 
-## Main Nodes
+## Outputs
 
-### 1. VNCCS Visual Camera Control
-**[Example Workflow](workflows/VNCCS_Utils%20Visual%20camera%20control%20node%20for%20Qwen-Image-Edit-2511-Multiple-Angles%20LoRa.json)**
+- `images`: rendered viewport image list.
+- `lighting_prompt`: prompt text generated from the scene lighting/context state.
+- `background_only`: the current viewport background as an image.
+- `character_1` to `character_4`: individual character renders on white backgrounds for downstream image editing tools.
 
-An interactive node with a visual widget for controlling camera position. This is the primary node for intuitive angle control.
-These node is specifically designed for advanced camera control and prompt generation, optimized for multi-angle LoRAs like **Qwen-Image-Edit-2511-Multiple-Angles**.
+## Main Features
 
-*   **Visual Widget**: Allows mouse-based selection of azimuth (rotation around the subject) and distance (rings).
-*   **Elevation Slider**: A vertical bar on the right for selecting the elevation angle (-30° to 60°).
-*   **Trigger Word**: A square indicator in the bottom-right corner toggles the presence of the <sks> trigger in the prompt (green for ON, red for OFF).
+- Interactive Three.js viewport embedded inside the ComfyUI node.
+- Up to four character meshes in one scene.
+- Add, delete, select, move, and rotate characters.
+- Character list stays synchronized with viewport selection.
+- Color-coded character slots: blue, yellow, red, green.
+- Per-character mesh controls for age, sex, weight, muscle, height, and body proportions.
+- Full-viewport background image support.
+- Pose and Move modes with separate point and character gizmo behavior.
+- Move Points mode for IK-supported joints without falling back to an accidental rotation gizmo.
+- Pose library save/load support with previews.
+- Import/export support for pose data.
+- Client-side viewport capture so output matches what is visible in the node.
 
-### 2. VNCCS QWEN Detailer
-**[Example Workflow](workflows/VNCCS_Utils%20QwenDetailer_ChangeEmotion.json)**
+## Pose Initializer
 
-A powerful detailing node that leverages QWEN-Image-Edit2511 model to enhance detected regions (faces, hands, objects). It goes beyond standard detailers by using visual understanding to guide the enhancement process.
+The Pose Initializer can load a source image and convert it to an editable OpenPose skeleton preview before applying it to the selected character.
 
-*   **Smart Cropping**: Automatically squares crops and handles padding for optimal model input.
-*   **Vision-Guided Enhancement**: Uses QWEN-generated instructions or user prompts to guide the detailing.
-*   **Drift Fix**: Includes mechanisms to prevent the enhanced region from drifting too far from the original composition.
-*   **Quality of Life**: Built-in color matching, Poisson blending (seam fix), and versatile upscaling options.
-*   **Inpainting Mode**: specialized mode for mask-based editing or filling black areas.
-*   **Inputs**: Requires standard model/clip/vae plus a BBOX_DETECTOR (like YOLO).
-*   **Options**: Supports QWEN-Image-Edit2511 specific optimizations (`distortion_fix`, `qwen_2511` mode).
+Before loading an image, the UI asks for one of two modes:
 
-### 3. VNCCS Model Manager & Selector
-**[Example Workflow](workflows/VNCCS_Utils%20Model%20Loader%20ShowCase.json)**
+- Single Angle: runs OpenPose/DWPose on the uploaded image only. This is faster and works best when the body is visible and clear.
+- Multi Angle: generates additional camera angles using Qwen Image Edit, detects skeletons on each generated view, and combines the views to improve the 3D pose. This takes longer and may download required Qwen models if they are missing.
 
-A robust system for managing and selecting models (LoRAs, Checkpoints) directly within ComfyUI, with support for Civitai and HuggingFace.
+The preview supports editable body, hand, and face keypoints when the installed preprocessor returns them. Missing limbs can be manually added or corrected before applying the pose.
 
-#### VNCCS Model Manager
-This node acts as the backend for the system. It connects to a HuggingFace repository containing a `model_updater.json` configuration file, which defines the available models and their download sources.
-*   **Repo ID**: Specify the HuggingFace repository ID.
-*   **Downloads**: Handles downloading models in the background with queue support.
-*   **Civitai Support**: Supports API Key authentication for restricted Civitai models.
+## Optional Character JSON
 
-👉 **[Configuration Guide: How to create your own model repo](docs/MODEL_MANAGER_GUIDE.md)**
+When connected, `characters_json` can create characters from a roster structure containing:
 
-#### VNCCS Model Selector
-The companion node for selecting models. It provides a rich Graphical User Interface.
-*   **Visual Card UI**: Displays the selected model's name, version, installed status, and description in a clean card format.
-*   **Smart Search**: Clicking the card opens a modal with a searchable list of all available models in the repository.
-*   **Status Indicators**: Shows clear indicators for "Installed", "Update Available", "Missing", or "Downloading".
-*   **One-Click Install/Update**: Allows downloading or updating models directly from the list.
-*   **Universal Connection**: Outputs a standard relative path string that is **fully compatible with standard ComfyUI nodes**. You can connect it directly!
+- `selected_count`
+- `characters_dir`
+- `characters`
 
-👉 **[Usage Guide: How to use Selector with Standard Loaders](docs/MODEL_SELECTOR_USAGE.md)**
+Each character entry can include fields such as `NAME`, `VISUAL`, `ATTIRE`, `PERSONALITY`, and `BACKSTORY`. The node uses these fields to infer a basic mesh profile and name the character. If a matching image exists in `characters_dir`, it appears in the character list.
 
-### 4. VNCCS BBox Extractor
-A helper node to simply extract and visualize the crops. Useful when you need extract bbox detected regions but don't want to run whole facedetailer.
+## Model Requirements
 
-### 5. VNCCS Pose Studio
-**[Example Workflow](workflows/VNCCS_Utils%20Pose%20Studio.json)**
+Core mesh posing uses the included MakeHuman data in `CharacterData/`.
 
-A professional 3D posing and lighting environment running entirely within a ComfyUI node.
+OpenPose initialization uses installed ComfyUI preprocessors when available:
 
-*   **Interactive Viewport**: Sophisticated bone manipulation with gizmos and **Undo/Redo** functionality.
-*   **Dynamic Body Generator**: Fine-tune character physical attributes including Age, Gender blending, Weight, Muscle, and Height with intuitive sliders.
-*   **Advanced Environment Lighting**: Ambient, Directional, and **Point Lights** with interactive 2D radars and radius control.
-*   **Keep Original Lighting**: One-click mode to bypass synthetic lights for clean, flat-white renders (ideal for ControlNet).
-*   **Customizable Prompt Templates**: Use tag-based templates (e.g., `<lighting>`, `<user_prompt>`) to define exactly how your final prompt is structured in settings.
-*   **Direct Sidebar Prompting**: A "Prompt" section in the right sidebar with an auto-expanding text box for adding scene details on the fly.
-*   **Modal Pose Gallery**: A clean, full-screen gallery to manage and load saved poses without cluttering the UI.
-*   **Multi-Pose Tabs**: System for creating batch outputs or sequences within a single node.
-*   **Precision Framing**: Integrated camera radar and Zoom controls with a clean viewport frame visualization.
-*   **Natural Language Prompts**: Automatically generates descriptive lighting prompts for seamless scene integration.
-*   **Tracing Support**: Load background reference images for precise character alignment.
+- DWPose is preferred when installed.
+- OpenPose is used as fallback when available.
+- Depth preprocessors are sampled when available to improve pose transfer.
 
-👉 **[Detailed Usage Guide](docs/VNCCS_POSE_STUDIO_USAGE.md)**
+Multi-angle mode uses native ComfyUI nodes directly and checks/downloads the required Qwen Image Edit model, VAE, text encoder, Lightning LoRA, and multi-angle LoRA when missing.
+
+## Runtime Files
+
+The isolated package keeps only the Pose Studio runtime:
+
+- `nodes/pose_studio.py`
+- `api/pose_library.py`
+- `CharacterData/`
+- `PoseLibrary/`
+- `web/advanced_pose_studio.js`
+- `web/advanced_pose_studio_core.js`
+- `web/advanced_openpose_import.js`
+- `web/three.module.js`
+- `web/OrbitControls.js`
+- `web/TransformControls.js`
+- `web/textures/`
 
 ## Installation
 
-1. Copy the ComfyUI_VNCCS_Utils folder into your ComfyUI custom_nodes directory.
-2. Restart ComfyUI.
-
+Place this folder in `ComfyUI/custom_nodes`, install the listed Python requirements if needed, and restart ComfyUI.

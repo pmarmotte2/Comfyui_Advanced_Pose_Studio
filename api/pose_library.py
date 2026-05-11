@@ -12,7 +12,7 @@ def get_library_path():
     return lib_path
 
 async def list_poses(request):
-    """GET /vnccs/pose_library/list - Returns list of saved poses."""
+    """GET /advanced_pose_studio/pose_library/list - Returns list of saved poses."""
     full_details = request.query.get("full") == "true"
     lib_path = get_library_path()
     poses = []
@@ -46,7 +46,7 @@ async def list_poses(request):
     return web.json_response({"poses": sorted(poses, key=lambda x: x["name"])})
 
 async def get_pose(request):
-    """GET /vnccs/pose_library/get/{name} - Returns pose data and preview."""
+    """GET /advanced_pose_studio/pose_library/get/{name} - Returns pose data and preview."""
     name = request.match_info.get("name")
     if not name:
         return web.json_response({"error": "Name required"}, status=400)
@@ -73,7 +73,7 @@ async def get_pose(request):
     })
 
 async def save_pose(request):
-    """POST /vnccs/pose_library/save - Saves a pose with optional preview."""
+    """POST /advanced_pose_studio/pose_library/save - Saves a pose with optional preview."""
     try:
         data = await request.json()
     except:
@@ -113,7 +113,7 @@ async def save_pose(request):
     return web.json_response({"success": True, "name": name})
 
 async def delete_pose(request):
-    """DELETE /vnccs/pose_library/delete/{name} - Deletes a pose."""
+    """DELETE /advanced_pose_studio/pose_library/delete/{name} - Deletes a pose."""
     name = request.match_info.get("name")
     if not name:
         return web.json_response({"error": "Name required"}, status=400)
@@ -132,7 +132,7 @@ async def delete_pose(request):
     return web.json_response({"success": True})
 
 async def get_preview(request):
-    """GET /vnccs/pose_library/preview/{name} - Returns preview image."""
+    """GET /advanced_pose_studio/pose_library/preview/{name} - Returns preview image."""
     name = request.match_info.get("name")
     if not name:
         return web.Response(status=400)
@@ -147,7 +147,7 @@ async def get_preview(request):
         return web.Response(body=f.read(), content_type="image/png")
 
 async def upload_pose_sync(request):
-    """POST /vnccs/pose_sync/upload_capture - Saves synchronized capture for execution."""
+    """POST /advanced_pose_studio/pose_sync/upload_capture - Saves synchronized capture for execution."""
     try:
         data = await request.json()
         node_id = data.get("node_id")
@@ -157,7 +157,7 @@ async def upload_pose_sync(request):
         import folder_paths
         temp_dir = folder_paths.get_temp_directory()
         # Note: we use 'debug' in the filename for backwards compatibility with the backend check
-        filepath = os.path.join(temp_dir, f"vnccs_debug_{node_id}.json")
+        filepath = os.path.join(temp_dir, f"advanced_pose_studio_sync_{node_id}.json")
         
         with open(filepath, "w") as f:
             json.dump(data, f)
@@ -168,10 +168,10 @@ async def upload_pose_sync(request):
 
 def register_routes(app):
     """Register Pose Library API routes."""
-    app.router.add_get("/vnccs/pose_library/list", list_poses)
-    app.router.add_get("/vnccs/pose_library/get/{name}", get_pose)
-    app.router.add_post("/vnccs/pose_library/save", save_pose)
-    app.router.add_delete("/vnccs/pose_library/delete/{name}", delete_pose)
-    app.router.add_get("/vnccs/pose_library/preview/{name}", get_preview)
-    app.router.add_post("/vnccs/pose_sync/upload_capture", upload_pose_sync)
-    app.router.add_post("/vnccs/debug/upload_capture", upload_pose_sync)  # Aliased for backward compatibility
+    app.router.add_get("/advanced_pose_studio/pose_library/list", list_poses)
+    app.router.add_get("/advanced_pose_studio/pose_library/get/{name}", get_pose)
+    app.router.add_post("/advanced_pose_studio/pose_library/save", save_pose)
+    app.router.add_delete("/advanced_pose_studio/pose_library/delete/{name}", delete_pose)
+    app.router.add_get("/advanced_pose_studio/pose_library/preview/{name}", get_preview)
+    app.router.add_post("/advanced_pose_studio/pose_sync/upload_capture", upload_pose_sync)
+    app.router.add_post("/advanced_pose_studio/debug/upload_capture", upload_pose_sync)  # Aliased for backward compatibility

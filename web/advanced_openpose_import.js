@@ -281,10 +281,10 @@ function _parseFaceKeypoints(kp) {
 }
 
 /**
- * Parse VNCCS skeleton JSON format.
+ * Parse Advanced Pose Studio skeleton JSON format.
  * Input: {joints: {name: [x, y]}, canvas: {width, height}}
  */
-export function parseVNCCSSkeletonJSON(data) {
+export function parseAdvancedSkeletonJSON(data) {
     const rawJoints = data.joints || {};
     const canvas = data.canvas || { width: 512, height: 1536 };
 
@@ -937,9 +937,9 @@ export function detectAndParseJSON(data) {
     if (data.people && Array.isArray(data.people)) {
         return parseOpenPoseJSON(data);
     }
-    // VNCCS skeleton format
+    // Advanced Pose Studio skeleton format
     if (data.joints && (data.canvas || data.canvas_width)) {
-        return parseVNCCSSkeletonJSON(data);
+        return parseAdvancedSkeletonJSON(data);
     }
     return null;
 }

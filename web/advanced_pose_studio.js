@@ -1,22 +1,22 @@
 /**
- * VNCCS Pose Studio - Combined mesh editor and multi-pose generator
+ * Advanced Pose Studio - Combined mesh editor and multi-pose generator
  * 
  * Combines Character Studio sliders, dynamic pose tabs, and Debug3 gizmo controls.
  */
 
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { PoseViewerCore, IK_CHAINS } from "./vnccs_pose_studio_core.js";
-import { detectAndParseJSON, extractKeypointsFromImage, convertOpenPoseToPose, roundTripTest } from "./vnccs_openpose_import.js";
+import { PoseViewerCore, IK_CHAINS } from "./advanced_pose_studio_core.js";
+import { detectAndParseJSON, extractKeypointsFromImage, convertOpenPoseToPose, roundTripTest } from "./advanced_openpose_import.js";
 
-// Determine the extension's base URL dynamically to support varied directory names (e.g. ComfyUI_VNCCS_Utils or vnccs-utils)
+// Determine the extension's base URL dynamically to support varied directory names (e.g. Comfyui_Advanced_Pose_Studio or Advanced-utils)
 const EXTENSION_URL = new URL(".", import.meta.url).toString();
 
 // === Styles ===
 const STYLES = `
-/* ===== VNCCS Pose Studio — Sakura Theme ===== */
+/* ===== Advanced Pose Studio Sakura Theme ===== */
 /* Variables scoped to the node container — won't leak to other ComfyUI tabs */
-.vnccs-pose-studio {
+.advanced-pose-studio {
     --ps-bg:            #0a0a0f;
     --ps-panel:         rgba(16, 14, 24, 0.92);
     --ps-elevated:      #1a1a26;
@@ -46,7 +46,7 @@ const STYLES = `
 }
 
 /* Main Container */
-.vnccs-pose-studio {
+.advanced-pose-studio {
     display: flex;
     flex-direction: row;
     width: 100%;
@@ -62,7 +62,7 @@ const STYLES = `
 }
 
 /* === Left Panel === */
-.vnccs-ps-left {
+.aps-left {
     width: 220px;
     flex-shrink: 0;
     display: flex;
@@ -75,11 +75,11 @@ const STYLES = `
     pointer-events: auto;
 }
 
-.vnccs-ps-left::-webkit-scrollbar { width: 4px; }
-.vnccs-ps-left::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 2px; }
+.aps-left::-webkit-scrollbar { width: 4px; }
+.aps-left::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 2px; }
 
 /* === Center Panel (Canvas) === */
-.vnccs-ps-center {
+.aps-center {
     flex: 1;
     min-width: 400px;
     display: flex;
@@ -89,7 +89,7 @@ const STYLES = `
 }
 
 /* === Right Sidebar (Lighting) === */
-.vnccs-ps-right-sidebar {
+.aps-right-sidebar {
     width: 220px;
     flex-shrink: 0;
     display: flex;
@@ -102,11 +102,11 @@ const STYLES = `
     background: rgba(6, 5, 12, 0.7);
 }
 
-.vnccs-ps-right-sidebar::-webkit-scrollbar { width: 4px; }
-.vnccs-ps-right-sidebar::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 2px; }
+.aps-right-sidebar::-webkit-scrollbar { width: 4px; }
+.aps-right-sidebar::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 2px; }
 
 /* === Section Component — Glassmorphic === */
-.vnccs-ps-section {
+.aps-section {
     background: rgba(20, 16, 30, 0.72);
     border: 1px solid var(--ps-accent-border);
     border-radius: var(--ps-radius-md);
@@ -117,7 +117,7 @@ const STYLES = `
 }
 
 /* Luminous top highlight */
-.vnccs-ps-section::before {
+.aps-section::before {
     content: '';
     position: absolute;
     top: 0; left: 14%; right: 14%;
@@ -128,7 +128,7 @@ const STYLES = `
     z-index: 1;
 }
 
-.vnccs-ps-section-header {
+.aps-section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -141,7 +141,7 @@ const STYLES = `
     overflow: hidden;
 }
 
-.vnccs-ps-section-title {
+.aps-section-title {
     font-size: 9px;
     font-weight: 700;
     color: var(--ps-accent);
@@ -152,7 +152,7 @@ const STYLES = `
     gap: 7px;
 }
 
-.vnccs-ps-section-title::before {
+.aps-section-title::before {
     content: '';
     width: 3px;
     height: 10px;
@@ -162,17 +162,17 @@ const STYLES = `
     flex-shrink: 0;
 }
 
-.vnccs-ps-section-toggle {
+.aps-section-toggle {
     font-size: 10px;
     color: var(--ps-text-muted);
     transition: transform var(--ps-transition);
 }
 
-.vnccs-ps-section.collapsed .vnccs-ps-section-toggle {
+.aps-section.collapsed .aps-section-toggle {
     transform: rotate(-90deg);
 }
 
-.vnccs-ps-section-content {
+.aps-section-content {
     padding: 8px;
     display: flex;
     flex-direction: column;
@@ -180,19 +180,19 @@ const STYLES = `
     pointer-events: auto;
 }
 
-.vnccs-ps-section.collapsed .vnccs-ps-section-content {
+.aps-section.collapsed .aps-section-content {
     display: none;
 }
 
 /* === Form Fields === */
-.vnccs-ps-field {
+.aps-field {
     display: flex;
     flex-direction: column;
     gap: 3px;
     pointer-events: auto;
 }
 
-.vnccs-ps-label {
+.aps-label {
     font-size: 9px;
     color: var(--ps-text-muted);
     text-transform: uppercase;
@@ -200,21 +200,21 @@ const STYLES = `
     letter-spacing: 0.8px;
 }
 
-.vnccs-ps-value {
+.aps-value {
     font-size: 9px;
     color: var(--ps-accent);
     margin-left: auto;
     font-family: var(--ps-font-mono);
 }
 
-.vnccs-ps-label-row {
+.aps-label-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
 }
 
 /* Slider */
-.vnccs-ps-slider-wrap {
+.aps-slider-wrap {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -226,11 +226,11 @@ const STYLES = `
     transition: border-color var(--ps-transition);
 }
 
-.vnccs-ps-slider-wrap:hover {
+.aps-slider-wrap:hover {
     border-color: var(--ps-border-hover);
 }
 
-.vnccs-ps-slider {
+.aps-slider {
     flex: 1;
     -webkit-appearance: none;
     appearance: none;
@@ -241,7 +241,7 @@ const STYLES = `
     pointer-events: auto;
 }
 
-.vnccs-ps-slider::-webkit-slider-thumb {
+.aps-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 13px;
     height: 13px;
@@ -252,11 +252,11 @@ const STYLES = `
     transition: box-shadow var(--ps-transition);
 }
 
-.vnccs-ps-slider::-webkit-slider-thumb:hover {
+.aps-slider::-webkit-slider-thumb:hover {
     box-shadow: 0 0 12px var(--ps-accent-glow);
 }
 
-.vnccs-ps-slider::-moz-range-thumb {
+.aps-slider::-moz-range-thumb {
     width: 13px;
     height: 13px;
     background: var(--ps-accent);
@@ -266,7 +266,7 @@ const STYLES = `
     box-shadow: 0 0 6px var(--ps-accent-glow);
 }
 
-.vnccs-ps-slider-val {
+.aps-slider-val {
     width: 35px;
     text-align: right;
     font-size: 10px;
@@ -277,7 +277,7 @@ const STYLES = `
 }
 
 /* Input */
-.vnccs-ps-input {
+.aps-input {
     background: var(--ps-input-bg);
     border: 1px solid var(--ps-border);
     color: var(--ps-text);
@@ -290,14 +290,14 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-input:focus {
+.aps-input:focus {
     outline: none;
     border-color: var(--ps-accent-border);
     background: rgba(255, 143, 163, 0.03);
     box-shadow: 0 0 0 2px rgba(255, 143, 163, 0.06);
 }
 
-.vnccs-ps-textarea {
+.aps-textarea {
     background: var(--ps-input-bg);
     border: 1px solid var(--ps-border);
     color: var(--ps-text);
@@ -315,7 +315,7 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-textarea:focus {
+.aps-textarea:focus {
     outline: none;
     border-color: var(--ps-accent-border);
     background: rgba(255, 143, 163, 0.03);
@@ -323,7 +323,7 @@ const STYLES = `
 }
 
 /* Select */
-.vnccs-ps-select {
+.aps-select {
     background: var(--ps-input-bg);
     border: 1px solid var(--ps-border);
     color: var(--ps-text);
@@ -337,7 +337,7 @@ const STYLES = `
 }
 
 /* Counter-zoom removed as zoom is now 1.0 */
-.vnccs-ps-select:focus {
+.aps-select:focus {
     outline: none;
     border-color: var(--ps-accent-border);
     transform: none;
@@ -345,7 +345,7 @@ const STYLES = `
 }
 
 /* Toggle */
-.vnccs-ps-toggle {
+.aps-toggle {
     display: flex;
     gap: 2px;
     background: rgba(0, 0, 0, 0.3);
@@ -354,7 +354,7 @@ const STYLES = `
     border: 1px solid var(--ps-border);
 }
 
-.vnccs-ps-toggle-btn {
+.aps-toggle-btn {
     flex: 1;
     border: none;
     padding: 4px 8px;
@@ -368,42 +368,42 @@ const STYLES = `
     color: var(--ps-text-muted);
 }
 
-.vnccs-ps-toggle-btn.active {
+.aps-toggle-btn.active {
     color: #1a1525;
 }
 
-.vnccs-ps-toggle-btn.male.active {
+.aps-toggle-btn.male.active {
     background: linear-gradient(135deg, #6ab0f5, #a3d0ff);
     box-shadow: 0 2px 8px rgba(106, 176, 245, 0.3);
 }
 
-.vnccs-ps-toggle-btn.female.active {
+.aps-toggle-btn.female.active {
     background: linear-gradient(135deg, var(--ps-accent), var(--ps-accent-hover));
     box-shadow: 0 2px 8px var(--ps-accent-glow);
 }
 
-.vnccs-ps-toggle-btn.list.active {
+.aps-toggle-btn.list.active {
     background: linear-gradient(135deg, #64d8cb, #a0ede6);
     box-shadow: 0 2px 8px rgba(100, 216, 203, 0.3);
 }
 
-.vnccs-ps-toggle-btn.grid.active {
+.aps-toggle-btn.grid.active {
     background: linear-gradient(135deg, #ffb347, #ffd580);
     box-shadow: 0 2px 8px rgba(255, 179, 71, 0.3);
 }
 
 /* Input Row */
-.vnccs-ps-row {
+.aps-row {
     display: flex;
     gap: 8px;
 }
 
-.vnccs-ps-row > * {
+.aps-row > * {
     flex: 1;
 }
 
 /* Color Picker */
-.vnccs-ps-color {
+.aps-color {
     width: 100%;
     height: 26px;
     border: 1px solid var(--ps-border);
@@ -414,12 +414,12 @@ const STYLES = `
     transition: border-color var(--ps-transition);
 }
 
-.vnccs-ps-color:hover {
+.aps-color:hover {
     border-color: var(--ps-accent-border);
 }
 
 /* === Tab Bar === */
-.vnccs-ps-tabs {
+.aps-tabs {
     display: flex;
     align-items: flex-end;
     padding: 8px 10px 0;
@@ -430,10 +430,10 @@ const STYLES = `
     flex-shrink: 0;
 }
 
-.vnccs-ps-tabs::-webkit-scrollbar { height: 2px; }
-.vnccs-ps-tabs::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 1px; }
+.aps-tabs::-webkit-scrollbar { height: 2px; }
+.aps-tabs::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 1px; }
 
-.vnccs-ps-tab {
+.aps-tab {
     display: flex;
     align-items: center;
     gap: 5px;
@@ -451,13 +451,13 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-tab:hover {
+.aps-tab:hover {
     background: rgba(255, 143, 163, 0.08);
     color: var(--ps-text);
     border-color: var(--ps-accent-border);
 }
 
-.vnccs-ps-reset-btn {
+.aps-reset-btn {
     width: 20px;
     height: 20px;
     background: transparent;
@@ -473,14 +473,14 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-reset-btn:hover {
+.aps-reset-btn:hover {
     color: var(--ps-accent);
     border-color: var(--ps-accent-border);
     background: var(--ps-accent-subtle);
 }
 
 /* Lighting UI Styles */
-.vnccs-ps-light-list {
+.aps-light-list {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -490,7 +490,7 @@ const STYLES = `
 }
 
 /* Light Card */
-.vnccs-ps-light-card {
+.aps-light-card {
     background: rgba(20, 16, 30, 0.7);
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-radius-sm);
@@ -498,14 +498,14 @@ const STYLES = `
     box-shadow: 0 4px 14px rgba(0,0,0,0.25);
     transition: all var(--ps-transition);
 }
-.vnccs-ps-light-card:hover {
+.aps-light-card:hover {
     border-color: var(--ps-border-hover);
     box-shadow: 0 6px 20px rgba(0,0,0,0.35);
     transform: translateY(-1px);
 }
 
 /* Header */
-.vnccs-ps-light-header {
+.aps-light-header {
     background: rgba(0,0,0,0.2);
     padding: 6px 10px;
     display: flex;
@@ -513,7 +513,7 @@ const STYLES = `
     justify-content: space-between;
     border-bottom: 1px solid var(--ps-border);
 }
-.vnccs-ps-light-title {
+.aps-light-title {
     font-weight: 600;
     font-size: 10px;
     color: var(--ps-text);
@@ -522,13 +522,13 @@ const STYLES = `
     gap: 6px;
     font-family: var(--ps-font);
 }
-.vnccs-ps-light-icon {
+.aps-light-icon {
     font-size: 14px;
     opacity: 0.8;
 }
 
 /* Remove Button */
-.vnccs-ps-light-remove {
+.aps-light-remove {
     width: 20px; height: 20px;
     border-radius: 5px;
     background: transparent;
@@ -542,14 +542,14 @@ const STYLES = `
     transition: all var(--ps-transition);
     padding: 0;
 }
-.vnccs-ps-light-remove:hover {
+.aps-light-remove:hover {
     background: rgba(255, 71, 87, 0.12);
     color: #ff4757;
     border-color: rgba(255, 71, 87, 0.3);
 }
 
 /* Body */
-.vnccs-ps-light-body {
+.aps-light-body {
     padding: 6px;
     display: flex;
     flex-direction: column;
@@ -557,7 +557,7 @@ const STYLES = `
 }
 
 /* Controls Grid */
-.vnccs-ps-light-grid {
+.aps-light-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 6px;
@@ -565,7 +565,7 @@ const STYLES = `
 }
 
 /* Input Styles */
-.vnccs-ps-light-select {
+.aps-light-select {
     width: 100%;
     background: var(--ps-input-bg);
     border: 1px solid var(--ps-border);
@@ -577,9 +577,9 @@ const STYLES = `
     cursor: pointer;
     transition: border-color var(--ps-transition);
 }
-.vnccs-ps-light-select:focus { border-color: var(--ps-accent-border); outline: none; }
+.aps-light-select:focus { border-color: var(--ps-accent-border); outline: none; }
 
-.vnccs-ps-light-color {
+.aps-light-color {
     width: 100%;
     height: 22px;
     border: 1px solid var(--ps-border);
@@ -590,22 +590,22 @@ const STYLES = `
     transition: border-color var(--ps-transition);
 }
 
-.vnccs-ps-light-color:hover { border-color: var(--ps-accent-border); }
+.aps-light-color:hover { border-color: var(--ps-accent-border); }
 
 /* Sliders */
-.vnccs-ps-light-slider-row {
+.aps-light-slider-row {
     display: flex;
     align-items: center;
     gap: 6px;
 }
-.vnccs-ps-light-slider {
+.aps-light-slider {
     flex: 1;
     height: 3px;
     background: rgba(255,255,255,0.1);
     border-radius: 2px;
     -webkit-appearance: none;
 }
-.vnccs-ps-light-slider::-webkit-slider-thumb {
+.aps-light-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 12px; height: 12px;
     border-radius: 50%;
@@ -615,7 +615,7 @@ const STYLES = `
 }
 
 /* Position Grid */
-.vnccs-ps-light-pos-grid {
+.aps-light-pos-grid {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 6px 10px;
@@ -625,13 +625,13 @@ const STYLES = `
     border-radius: var(--ps-radius-sm);
     border: 1px solid var(--ps-border);
 }
-.vnccs-ps-light-pos-label {
+.aps-light-pos-label {
     font-size: 9px;
     color: var(--ps-text-muted);
     font-weight: 700;
     width: 10px;
 }
-.vnccs-ps-light-value {
+.aps-light-value {
     width: 30px;
     flex-shrink: 0;
     text-align: right;
@@ -641,7 +641,7 @@ const STYLES = `
 }
 
 /* Light Radar */
-.vnccs-ps-light-radar-wrap {
+.aps-light-radar-wrap {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -650,14 +650,14 @@ const STYLES = `
     border-radius: var(--ps-radius-sm);
     border: 1px solid var(--ps-border);
 }
-.vnccs-ps-light-radar-main {
+.aps-light-radar-main {
     display: flex;
     align-items: center;
     gap: 12px;
     justify-content: center;
     width: 100%;
 }
-.vnccs-ps-light-radar-canvas {
+.aps-light-radar-canvas {
     border-radius: 50%;
     border: 1px solid var(--ps-border);
     cursor: crosshair;
@@ -665,7 +665,7 @@ const STYLES = `
     box-shadow: inset 0 0 12px rgba(0,0,0,0.6), 0 0 8px rgba(255,143,163,0.05);
     flex-shrink: 0;
 }
-.vnccs-ps-light-slider-vert-wrap {
+.aps-light-slider-vert-wrap {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -674,7 +674,7 @@ const STYLES = `
     width: 35px;
     flex-shrink: 0;
 }
-.vnccs-ps-light-slider-vert {
+.aps-light-slider-vert {
     -webkit-appearance: slider-vertical;
     appearance: slider-vertical;
     writing-mode: vertical-lr;
@@ -685,20 +685,20 @@ const STYLES = `
     background: rgba(255,255,255,0.1);
     margin: 0;
 }
-.vnccs-ps-light-slider-vert::-webkit-slider-runnable-track {
+.aps-light-slider-vert::-webkit-slider-runnable-track {
     background: transparent;
 }
-.vnccs-ps-light-slider-vert::-webkit-slider-thumb {
+.aps-light-slider-vert::-webkit-slider-thumb {
     width: 12px; height: 12px;
 }
-.vnccs-ps-light-h-val {
+.aps-light-h-val {
     font-size: 10px;
     color: var(--ps-accent);
     height: 12px;
     line-height: 12px;
     font-family: var(--ps-font-mono);
 }
-.vnccs-ps-light-h-label {
+.aps-light-h-label {
     font-size: 9px;
     color: var(--ps-text-dim);
     font-weight: 700;
@@ -709,7 +709,7 @@ const STYLES = `
 
 
 /* Large Add Btn */
-.vnccs-ps-btn-add-large {
+.aps-btn-add-large {
     width: 100%;
     padding: 8px;
     background: rgba(255, 143, 163, 0.04);
@@ -722,13 +722,13 @@ const STYLES = `
     transition: all var(--ps-transition);
     margin-top: 5px;
 }
-.vnccs-ps-btn-add-large:hover {
+.aps-btn-add-large:hover {
     border-color: var(--ps-accent);
     color: var(--ps-accent);
     background: var(--ps-accent-subtle);
 }
 
-.vnccs-ps-tab.active {
+.aps-tab.active {
     background: rgba(255, 143, 163, 0.12);
     color: var(--ps-accent);
     border-color: var(--ps-accent-border);
@@ -737,7 +737,7 @@ const STYLES = `
     box-shadow: 0 -3px 10px rgba(255, 143, 163, 0.1);
 }
 
-.vnccs-ps-tab-close {
+.aps-tab-close {
     font-size: 14px;
     line-height: 1;
     color: var(--ps-text-muted);
@@ -746,12 +746,12 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-tab-close:hover {
+.aps-tab-close:hover {
     color: var(--ps-danger);
     opacity: 1;
 }
 
-.vnccs-ps-tab-add {
+.aps-tab-add {
     padding: 5px 10px;
     background: transparent;
     border: 1px dashed rgba(255, 255, 255, 0.12);
@@ -764,14 +764,14 @@ const STYLES = `
     line-height: 1;
 }
 
-.vnccs-ps-tab-add:hover {
+.aps-tab-add:hover {
     background: var(--ps-accent-subtle);
     border-color: var(--ps-accent-border);
     color: var(--ps-accent);
 }
 
 /* === 3D Canvas === */
-.vnccs-ps-canvas-wrap {
+.aps-canvas-wrap {
     flex: 1;
     position: relative;
     overflow: hidden;
@@ -781,14 +781,14 @@ const STYLES = `
     background-size: 22px 22px, 100% 100%;
 }
 
-.vnccs-ps-canvas-wrap canvas {
+.aps-canvas-wrap canvas {
     width: 100% !important;
     height: 100% !important;
     display: block;
 }
 
 /* === Action Bar === */
-.vnccs-ps-actions {
+.aps-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 5px;
@@ -798,7 +798,7 @@ const STYLES = `
     flex-shrink: 0;
 }
 
-.vnccs-ps-btn {
+.aps-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -815,13 +815,13 @@ const STYLES = `
     transition: all var(--ps-transition);
 }
 
-.vnccs-ps-btn:hover {
+.aps-btn:hover {
     background: rgba(255, 255, 255, 0.09);
     border-color: var(--ps-border-hover);
     transform: translateY(-1px);
 }
 
-.vnccs-ps-btn.primary {
+.aps-btn.primary {
     background: linear-gradient(135deg, var(--ps-accent) 0%, var(--ps-accent-hover) 100%);
     border-color: var(--ps-accent);
     color: #1a1525;
@@ -831,7 +831,7 @@ const STYLES = `
     overflow: hidden;
 }
 
-.vnccs-ps-btn.primary::after {
+.aps-btn.primary::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -847,42 +847,42 @@ const STYLES = `
     100%{ transform: translateX(120%) skewX(-15deg); opacity: 0; }
 }
 
-.vnccs-ps-btn.primary:hover {
+.aps-btn.primary:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px var(--ps-accent-glow);
 }
 
-.vnccs-ps-btn.danger {
+.aps-btn.danger {
     background: rgba(255, 71, 87, 0.12);
     border-color: rgba(255, 71, 87, 0.3);
     color: #ff4757;
 }
 
-.vnccs-ps-btn.danger:hover {
+.aps-btn.danger:hover {
     background: #ff4757;
     border-color: #ff4757;
     color: white;
 }
 
-.vnccs-ps-btn--sync-tabs {
+.aps-btn--sync-tabs {
     background: rgba(80, 120, 200, 0.18);
     border-color: rgba(100, 150, 255, 0.35);
     color: #8ab4ff;
 }
 
-.vnccs-ps-btn--sync-tabs:hover {
+.aps-btn--sync-tabs:hover {
     background: rgba(80, 120, 200, 0.32);
     border-color: rgba(100, 150, 255, 0.6);
     color: #b8d0ff;
 }
 
-.vnccs-ps-btn-icon {
+.aps-btn-icon {
     font-size: 14px;
     line-height: 1;
 }
 
 /* === Modal Dialog === */
-.vnccs-ps-modal-overlay {
+.aps-modal-overlay {
     position: absolute;
     top: 0;
     left: 0;
@@ -897,7 +897,7 @@ const STYLES = `
     pointer-events: auto;
 }
 
-.vnccs-ps-modal {
+.aps-modal {
     background: rgba(18, 14, 28, 0.95);
     border: 1px solid var(--ps-accent-border);
     border-radius: var(--ps-radius-lg);
@@ -910,7 +910,7 @@ const STYLES = `
     position: relative;
 }
 
-.vnccs-ps-modal::before {
+.aps-modal::before {
     content: '';
     position: absolute;
     top: 0; left: 15%; right: 15%;
@@ -919,7 +919,7 @@ const STYLES = `
     pointer-events: none;
 }
 
-.vnccs-ps-footer {
+.aps-footer {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
@@ -928,17 +928,17 @@ const STYLES = `
     margin-top: 8px;
 }
 
-.vnccs-ps-footer .vnccs-ps-btn {
+.aps-footer .aps-btn {
     flex: 1;
     min-width: 40px;
 }
 
-.vnccs-ps-actions .vnccs-ps-btn {
+.aps-actions .aps-btn {
     flex: 1;
     min-width: 40px;
 }
 
-.vnccs-ps-modal-title {
+.aps-modal-title {
     background: rgba(0, 0, 0, 0.3);
     padding: 12px 16px;
     border-bottom: 1px solid var(--ps-border);
@@ -950,14 +950,14 @@ const STYLES = `
     letter-spacing: 0.5px;
 }
 
-.vnccs-ps-modal-content {
+.aps-modal-content {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 14px;
 }
 
-.vnccs-ps-modal-btn {
+.aps-modal-btn {
     padding: 10px 12px;
     border: 1px solid var(--ps-border);
     background: rgba(255, 255, 255, 0.04);
@@ -973,13 +973,13 @@ const STYLES = `
     font-size: 11px;
 }
 
-.vnccs-ps-modal-btn:hover {
+.aps-modal-btn:hover {
     background: var(--ps-accent-subtle);
     border-color: var(--ps-accent-border);
     color: var(--ps-accent-hover);
 }
 
-.vnccs-ps-settings-panel {
+.aps-settings-panel {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(8, 6, 16, 0.97);
@@ -989,7 +989,7 @@ const STYLES = `
     flex-direction: column;
 }
 
-.vnccs-ps-settings-header {
+.aps-settings-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -998,7 +998,7 @@ const STYLES = `
     border-bottom: 1px solid var(--ps-border);
 }
 
-.vnccs-ps-settings-title {
+.aps-settings-title {
     font-size: 13px;
     font-weight: 700;
     color: var(--ps-accent);
@@ -1009,7 +1009,7 @@ const STYLES = `
     letter-spacing: 0.5px;
 }
 
-.vnccs-ps-settings-content {
+.aps-settings-content {
     flex: 1;
     overflow-y: auto;
     padding: 20px;
@@ -1018,7 +1018,7 @@ const STYLES = `
     gap: 16px;
 }
 
-.vnccs-ps-settings-close {
+.aps-settings-close {
     background: transparent;
     border: none;
     color: var(--ps-text-muted);
@@ -1028,11 +1028,11 @@ const STYLES = `
     transition: color var(--ps-transition);
 }
 
-.vnccs-ps-settings-close:hover {
+.aps-settings-close:hover {
     color: var(--ps-accent);
 }
 
-.vnccs-ps-msg-modal {
+.aps-msg-modal {
     background: rgba(18, 14, 28, 0.95);
     border: 1px solid var(--ps-accent-border);
     border-radius: var(--ps-radius-lg);
@@ -1044,13 +1044,13 @@ const STYLES = `
     padding: 0;
 }
 
-.vnccs-ps-modal-btn.cancel:hover {
+.aps-modal-btn.cancel:hover {
     color: var(--ps-text);
     background: rgba(255, 255, 255, 0.06);
 }
 
 /* === Pose Library Panel === */
-.vnccs-ps-library-btn {
+.aps-library-btn {
     position: absolute;
     right: 0;
     top: 50%;
@@ -1068,13 +1068,13 @@ const STYLES = `
     box-shadow: -4px 0 20px var(--ps-accent-glow);
 }
 
-.vnccs-ps-library-btn:hover {
+.aps-library-btn:hover {
     padding-right: 12px;
     box-shadow: -6px 0 28px var(--ps-accent-glow);
 }
 
 /* Library Modal Overlay */
-.vnccs-ps-modal-overlay {
+.aps-modal-overlay {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
@@ -1087,7 +1087,7 @@ const STYLES = `
     backdrop-filter: blur(10px);
 }
 
-.vnccs-ps-library-modal {
+.aps-library-modal {
     width: 95%;
     max-width: 1200px;
     height: 90%;
@@ -1103,7 +1103,7 @@ const STYLES = `
     position: relative;
 }
 
-.vnccs-ps-library-modal::before {
+.aps-library-modal::before {
     content: '';
     position: absolute;
     top: 0; left: 15%; right: 15%;
@@ -1112,7 +1112,7 @@ const STYLES = `
     pointer-events: none;
 }
 
-.vnccs-ps-library-modal-header {
+.aps-library-modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1121,7 +1121,7 @@ const STYLES = `
     border-bottom: 1px solid var(--ps-border);
 }
 
-.vnccs-ps-library-modal-title {
+.aps-library-modal-title {
     font-size: 16px;
     font-weight: 700;
     color: var(--ps-accent);
@@ -1132,7 +1132,7 @@ const STYLES = `
     letter-spacing: 0.5px;
 }
 
-.vnccs-ps-modal-close {
+.aps-modal-close {
     background: transparent;
     border: none;
     color: var(--ps-text-muted);
@@ -1142,9 +1142,9 @@ const STYLES = `
     padding: 2px 6px;
 }
 
-.vnccs-ps-modal-close:hover { color: var(--ps-accent); }
+.aps-modal-close:hover { color: var(--ps-accent); }
 
-.vnccs-ps-library-modal-grid {
+.aps-library-modal-grid {
     flex: 1;
     overflow-y: scroll;
     padding: 20px;
@@ -1153,12 +1153,12 @@ const STYLES = `
     gap: 16px;
     align-content: start;
 }
-.vnccs-ps-library-modal-grid::-webkit-scrollbar { width: 6px; }
-.vnccs-ps-library-modal-grid::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
-.vnccs-ps-library-modal-grid::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 3px; }
-.vnccs-ps-library-modal-grid::-webkit-scrollbar-thumb:hover { background: var(--ps-accent); }
+.aps-library-modal-grid::-webkit-scrollbar { width: 6px; }
+.aps-library-modal-grid::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+.aps-library-modal-grid::-webkit-scrollbar-thumb { background: var(--ps-accent-border); border-radius: 3px; }
+.aps-library-modal-grid::-webkit-scrollbar-thumb:hover { background: var(--ps-accent); }
 
-.vnccs-ps-library-modal-footer {
+.aps-library-modal-footer {
     padding: 14px 20px;
     border-top: 1px solid var(--ps-border);
     background: rgba(0, 0, 0, 0.3);
@@ -1166,7 +1166,7 @@ const STYLES = `
     justify-content: flex-end;
 }
 
-.vnccs-ps-library-header {
+.aps-library-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1175,7 +1175,7 @@ const STYLES = `
     background: rgba(0, 0, 0, 0.25);
 }
 
-.vnccs-ps-library-title {
+.aps-library-title {
     font-weight: 700;
     color: var(--ps-accent);
     font-size: 11px;
@@ -1184,7 +1184,7 @@ const STYLES = `
     font-family: var(--ps-font);
 }
 
-.vnccs-ps-library-close {
+.aps-library-close {
     background: transparent;
     border: none;
     color: var(--ps-text-muted);
@@ -1195,11 +1195,11 @@ const STYLES = `
     transition: color var(--ps-transition);
 }
 
-.vnccs-ps-library-close:hover {
+.aps-library-close:hover {
     color: var(--ps-accent);
 }
 
-.vnccs-ps-library-grid {
+.aps-library-grid {
     flex: 1;
     overflow-y: auto;
     padding: 8px;
@@ -1209,7 +1209,7 @@ const STYLES = `
     align-content: start;
 }
 
-.vnccs-ps-library-item {
+.aps-library-item {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--ps-border);
     border-radius: var(--ps-radius-sm);
@@ -1222,7 +1222,7 @@ const STYLES = `
     flex-direction: column;
 }
 
-.vnccs-ps-library-item-delete {
+.aps-library-item-delete {
     position: absolute;
     top: 6px; right: 6px;
     width: 22px; height: 22px;
@@ -1240,22 +1240,22 @@ const STYLES = `
     z-index: 10;
 }
 
-.vnccs-ps-library-item:hover .vnccs-ps-library-item-delete {
+.aps-library-item:hover .aps-library-item-delete {
     opacity: 1;
 }
 
-.vnccs-ps-library-item-delete:hover {
+.aps-library-item-delete:hover {
     background: #ff4757;
     transform: scale(1.15);
 }
 
-.vnccs-ps-library-item:hover {
+.aps-library-item:hover {
     border-color: var(--ps-accent-border);
     transform: translateY(-3px);
     box-shadow: 0 8px 24px rgba(0,0,0,0.3), 0 0 12px var(--ps-accent-subtle);
 }
 
-.vnccs-ps-library-item-preview {
+.aps-library-item-preview {
     width: 100%;
     flex: 1;
     background: rgba(8, 6, 16, 0.8);
@@ -1267,13 +1267,13 @@ const STYLES = `
     overflow: hidden;
 }
 
-.vnccs-ps-library-item-preview img {
+.aps-library-item-preview img {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
 
-.vnccs-ps-library-item-name {
+.aps-library-item-name {
     position: absolute;
     bottom: 0; left: 0;
     width: 100%;
@@ -1290,12 +1290,12 @@ const STYLES = `
     font-family: var(--ps-font);
 }
 
-.vnccs-ps-library-footer {
+.aps-library-footer {
     padding: 8px;
     border-top: 1px solid var(--ps-border);
 }
 
-.vnccs-ps-library-empty {
+.aps-library-empty {
     grid-column: 1 / -1;
     text-align: center;
     color: var(--ps-text-muted);
@@ -1305,7 +1305,7 @@ const STYLES = `
 }
 
 /* === Loading Overlay === */
-.vnccs-ps-loading-overlay {
+.aps-loading-overlay {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
@@ -1322,14 +1322,14 @@ const STYLES = `
 }
 
 /* Dual-ring sakura spinner */
-.vnccs-ps-loading-spinner {
+.aps-loading-spinner {
     width: 50px;
     height: 50px;
     position: relative;
 }
 
-.vnccs-ps-loading-spinner::before,
-.vnccs-ps-loading-spinner::after {
+.aps-loading-spinner::before,
+.aps-loading-spinner::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -1337,14 +1337,14 @@ const STYLES = `
     border: 3px solid transparent;
 }
 
-.vnccs-ps-loading-spinner::before {
+.aps-loading-spinner::before {
     border-top-color: var(--ps-accent);
     border-right-color: rgba(255, 143, 163, 0.3);
     animation: ps-spin 1s linear infinite;
     box-shadow: 0 0 18px var(--ps-accent-glow);
 }
 
-.vnccs-ps-loading-spinner::after {
+.aps-loading-spinner::after {
     inset: 8px;
     border-bottom-color: var(--ps-accent-lavender);
     border-left-color: rgba(184, 169, 232, 0.25);
@@ -1356,7 +1356,7 @@ const STYLES = `
     100% { transform: rotate(360deg); }
 }
 
-.vnccs-ps-loading-text {
+.aps-loading-text {
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 2px;
@@ -1383,6 +1383,8 @@ class PoseStudioWidget {
         this.poses = [{}];  // Array of pose data
         this.activeTab = 0;
         this.poseCaptures = []; // Cache for captured images
+        this.backgroundOnlyCapture = null;
+        this.characterLayerCaptures = [null, null, null, null];
         this.ikMode = true; // IK mode toggle (false = FK, true = IK)
 
         // Slider values
@@ -1443,18 +1445,18 @@ class PoseStudioWidget {
 
     _createLayout() {
         this.container = document.createElement("div");
-        this.container.className = "vnccs-pose-studio";
+        this.container.className = "advanced-pose-studio";
 
         this.leftPanel = document.createElement("div");
-        this.leftPanel.className = "vnccs-ps-left";
+        this.leftPanel.className = "aps-left";
         this.container.appendChild(this.leftPanel);
 
         this.centerPanel = document.createElement("div");
-        this.centerPanel.className = "vnccs-ps-center";
+        this.centerPanel.className = "aps-center";
         this.container.appendChild(this.centerPanel);
 
         this.rightSidebar = document.createElement("div");
-        this.rightSidebar.className = "vnccs-ps-right-sidebar";
+        this.rightSidebar.className = "aps-right-sidebar";
         this.container.appendChild(this.rightSidebar);
     }
 
@@ -1466,22 +1468,22 @@ class PoseStudioWidget {
 
         // Gender Toggle
         const genderField = document.createElement("div");
-        genderField.className = "vnccs-ps-field";
+        genderField.className = "aps-field";
 
         const genderLabel = document.createElement("div");
-        genderLabel.className = "vnccs-ps-label";
+        genderLabel.className = "aps-label";
         genderLabel.innerText = "Gender";
         genderField.appendChild(genderLabel);
 
         const genderToggle = document.createElement("div");
-        genderToggle.className = "vnccs-ps-toggle";
+        genderToggle.className = "aps-toggle";
 
         const btnMale = document.createElement("button");
-        btnMale.className = "vnccs-ps-toggle-btn male";
+        btnMale.className = "aps-toggle-btn male";
         btnMale.innerText = "Male";
 
         const btnFemale = document.createElement("button");
-        btnFemale.className = "vnccs-ps-toggle-btn female";
+        btnFemale.className = "aps-toggle-btn female";
         btnFemale.innerText = "Female";
 
         this.genderBtns = { male: btnMale, female: btnFemale };
@@ -1555,26 +1557,113 @@ class PoseStudioWidget {
         this.updateGenderVisibility();
         leftPanel.appendChild(genderSection.el);
 
+        // --- SCENE CHARACTERS SECTION ---
+        const charactersSection = this.createSection("Scene Characters", true);
+        const characterActions = document.createElement("div");
+        characterActions.className = "aps-row";
+
+        const addCharacterBtn = document.createElement("button");
+        addCharacterBtn.className = "aps-btn";
+        addCharacterBtn.textContent = "+ Add";
+        addCharacterBtn.title = "Add another character mesh to the scene";
+        addCharacterBtn.onclick = () => this.addSceneCharacter();
+
+        const deleteCharacterBtn = document.createElement("button");
+        deleteCharacterBtn.className = "aps-btn danger";
+        deleteCharacterBtn.textContent = "Delete";
+        deleteCharacterBtn.title = "Delete selected character mesh";
+        deleteCharacterBtn.onclick = () => this.deleteSceneCharacter();
+
+        characterActions.appendChild(addCharacterBtn);
+        characterActions.appendChild(deleteCharacterBtn);
+        charactersSection.content.appendChild(characterActions);
+
+        const characterMoveRow = document.createElement("div");
+        characterMoveRow.className = "aps-row";
+
+        const moveCharacterBtn = document.createElement("button");
+        moveCharacterBtn.className = "aps-btn";
+        moveCharacterBtn.textContent = "Move";
+        moveCharacterBtn.title = "Attach the gizmo to the selected character mesh";
+        moveCharacterBtn.onclick = () => this.setCharacterMoveMode(true);
+
+        const poseCharacterBtn = document.createElement("button");
+        poseCharacterBtn.className = "aps-btn";
+        poseCharacterBtn.textContent = "Pose";
+        poseCharacterBtn.title = "Return gizmo control to pose joints";
+        poseCharacterBtn.onclick = () => this.setCharacterMoveMode(false);
+
+        this.characterMoveBtn = moveCharacterBtn;
+        this.characterPoseBtn = poseCharacterBtn;
+        characterMoveRow.appendChild(moveCharacterBtn);
+        characterMoveRow.appendChild(poseCharacterBtn);
+        charactersSection.content.appendChild(characterMoveRow);
+
+        const pointGizmoRow = document.createElement("div");
+        pointGizmoRow.className = "aps-row";
+
+        const rotatePointBtn = document.createElement("button");
+        rotatePointBtn.className = "aps-btn";
+        rotatePointBtn.textContent = "Rotate Points";
+        rotatePointBtn.title = "Use the rotation gizmo on selected skeleton points";
+        rotatePointBtn.onclick = () => this.setPointGizmoMode("rotate");
+
+        const movePointBtn = document.createElement("button");
+        movePointBtn.className = "aps-btn";
+        movePointBtn.textContent = "Move Points";
+        movePointBtn.title = "Use the move gizmo on IK-supported skeleton points";
+        movePointBtn.onclick = () => this.setPointGizmoMode("move");
+
+        this.rotatePointBtn = rotatePointBtn;
+        this.movePointBtn = movePointBtn;
+        pointGizmoRow.appendChild(rotatePointBtn);
+        pointGizmoRow.appendChild(movePointBtn);
+        charactersSection.content.appendChild(pointGizmoRow);
+
+        const poseInitializerBtn = document.createElement("button");
+        poseInitializerBtn.className = "aps-btn";
+        poseInitializerBtn.textContent = "Pose Initializer";
+        poseInitializerBtn.title = "Load an OpenPose image and apply it to the selected character";
+        poseInitializerBtn.style.width = "100%";
+        poseInitializerBtn.onclick = () => this.openPoseInitializer();
+        this.poseInitializerBtn = poseInitializerBtn;
+        charactersSection.content.appendChild(poseInitializerBtn);
+
+        const loadRosterBtn = document.createElement("button");
+        loadRosterBtn.className = "aps-btn";
+        loadRosterBtn.textContent = "Load JSON Characters";
+        loadRosterBtn.title = "Create scene characters from the optional characters_json input";
+        loadRosterBtn.onclick = () => this.loadCharactersFromJsonInput();
+        charactersSection.content.appendChild(loadRosterBtn);
+
+        this.characterListEl = document.createElement("div");
+        this.characterListEl.style.display = "flex";
+        this.characterListEl.style.flexDirection = "column";
+        this.characterListEl.style.gap = "4px";
+        charactersSection.content.appendChild(this.characterListEl);
+
+        leftPanel.appendChild(charactersSection.el);
+
         // --- MODEL ROTATION SECTION ---
         const rotSection = this.createSection("Model Rotation", false);
 
         ['x', 'y', 'z'].forEach(axis => {
             const field = document.createElement("div");
-            field.className = "vnccs-ps-field";
+            field.className = "aps-field";
 
             const labelRow = document.createElement("div");
-            labelRow.className = "vnccs-ps-label-row";
+            labelRow.className = "aps-label-row";
 
             const labelSpan = document.createElement("span");
-            labelSpan.className = "vnccs-ps-label";
+            labelSpan.className = "aps-label";
             labelSpan.textContent = axis.toUpperCase();
 
             const valueSpan = document.createElement("span");
-            valueSpan.className = "vnccs-ps-value";
+            valueSpan.className = "aps-value";
             valueSpan.textContent = "0°";
 
             const resetBtn = document.createElement("button");
-            resetBtn.className = "vnccs-ps-reset-btn";
+            resetBtn.className = "aps-reset-btn";
             resetBtn.innerHTML = "↺";
             resetBtn.title = "Reset to 0°";
             resetBtn.onclick = (e) => {
@@ -1598,11 +1687,11 @@ class PoseStudioWidget {
             labelRow.appendChild(valueRow);
 
             const wrap = document.createElement("div");
-            wrap.className = "vnccs-ps-slider-wrap";
+            wrap.className = "aps-slider-wrap";
 
             const slider = document.createElement("input");
             slider.type = "range";
-            slider.className = "vnccs-ps-slider";
+            slider.className = "aps-slider";
             slider.min = -180;
             slider.max = 180;
             slider.step = 1;
@@ -1630,7 +1719,7 @@ class PoseStudioWidget {
         // --- CAMERA SETTINGS SECTION ---
         const camSection = this.createSection("Camera", true);
         const dimRow = document.createElement("div");
-        dimRow.className = "vnccs-ps-row";
+        dimRow.className = "aps-row";
         dimRow.appendChild(this.createInputField("Width", "view_width", "number", 64, 4096, 8));
         dimRow.appendChild(this.createInputField("Height", "view_height", "number", 64, 4096, 8));
         camSection.content.appendChild(dimRow);
@@ -1645,19 +1734,19 @@ class PoseStudioWidget {
         const exportSection = this.createSection("Export Settings", true);
 
         const modeField = document.createElement("div");
-        modeField.className = "vnccs-ps-field";
+        modeField.className = "aps-field";
         const modeLabel = document.createElement("div");
-        modeLabel.className = "vnccs-ps-label";
+        modeLabel.className = "aps-label";
         modeLabel.innerText = "Output Mode";
 
         const modeToggle = document.createElement("div");
-        modeToggle.className = "vnccs-ps-toggle";
+        modeToggle.className = "aps-toggle";
 
         const btnList = document.createElement("button");
-        btnList.className = "vnccs-ps-toggle-btn list";
+        btnList.className = "aps-toggle-btn list";
         btnList.innerText = "List";
         const btnGrid = document.createElement("button");
-        btnGrid.className = "vnccs-ps-toggle-btn grid";
+        btnGrid.className = "aps-toggle-btn grid";
         btnGrid.innerText = "Grid";
 
         const updateModeUI = () => {
@@ -1707,13 +1796,13 @@ class PoseStudioWidget {
 
         // Tab Bar
         this.tabsContainer = document.createElement("div");
-        this.tabsContainer.className = "vnccs-ps-tabs";
+        this.tabsContainer.className = "aps-tabs";
         this.updateTabs();
         centerPanel.appendChild(this.tabsContainer);
 
         // Canvas Container
         this.canvasContainer = document.createElement("div");
-        this.canvasContainer.className = "vnccs-ps-canvas-wrap";
+        this.canvasContainer.className = "aps-canvas-wrap";
 
         this.canvas = document.createElement("canvas");
         this.canvasContainer.appendChild(this.canvas);
@@ -1721,26 +1810,26 @@ class PoseStudioWidget {
 
         // Action Bar
         const actions = document.createElement("div");
-        actions.className = "vnccs-ps-actions";
+        actions.className = "aps-actions";
 
         const undoBtn = document.createElement("button");
-        undoBtn.className = "vnccs-ps-btn";
-        undoBtn.innerHTML = '<span class="vnccs-ps-btn-icon">↩</span> Undo';
+        undoBtn.className = "aps-btn";
+        undoBtn.innerHTML = '<span class="aps-btn-icon">↩</span> Undo';
         undoBtn.onclick = () => this.viewer && this.viewer.undo();
 
         const redoBtn = document.createElement("button");
-        redoBtn.className = "vnccs-ps-btn";
-        redoBtn.innerHTML = '<span class="vnccs-ps-btn-icon">↪</span> Redo';
+        redoBtn.className = "aps-btn";
+        redoBtn.innerHTML = '<span class="aps-btn-icon">↪</span> Redo';
         redoBtn.onclick = () => this.viewer && this.viewer.redo();
 
         const resetBtn = document.createElement("button");
-        resetBtn.className = "vnccs-ps-btn";
-        resetBtn.innerHTML = '<span class="vnccs-ps-btn-icon">↺</span> Reset';
+        resetBtn.className = "aps-btn";
+        resetBtn.innerHTML = '<span class="aps-btn-icon">↺</span> Reset';
         resetBtn.addEventListener("click", () => this.resetCurrentPose());
 
         const snapBtn = document.createElement("button");
-        snapBtn.className = "vnccs-ps-btn primary";
-        snapBtn.innerHTML = '<span class="vnccs-ps-btn-icon">👁</span> Preview';
+        snapBtn.className = "aps-btn primary";
+        snapBtn.innerHTML = '<span class="aps-btn-icon">👁</span> Preview';
         snapBtn.title = "Snap viewport camera to output camera";
         snapBtn.addEventListener("click", () => {
             if (this.viewer) this.viewer.snapToCaptureCamera(
@@ -1753,13 +1842,13 @@ class PoseStudioWidget {
         });
 
         const copyBtn = document.createElement("button");
-        copyBtn.className = "vnccs-ps-btn";
-        copyBtn.innerHTML = '<span class="vnccs-ps-btn-icon">📋</span> Copy';
+        copyBtn.className = "aps-btn";
+        copyBtn.innerHTML = '<span class="aps-btn-icon">📋</span> Copy';
         copyBtn.addEventListener("click", () => this.copyPose());
 
         const pasteBtn = document.createElement("button");
-        pasteBtn.className = "vnccs-ps-btn";
-        pasteBtn.innerHTML = '<span class="vnccs-ps-btn-icon">📋</span> Paste';
+        pasteBtn.className = "aps-btn";
+        pasteBtn.innerHTML = '<span class="aps-btn-icon">📋</span> Paste';
         pasteBtn.addEventListener("click", () => this.pastePose());
 
         actions.appendChild(undoBtn);
@@ -1771,28 +1860,28 @@ class PoseStudioWidget {
 
         // Footer
         const footer = document.createElement("div");
-        footer.className = "vnccs-ps-footer";
+        footer.className = "aps-footer";
 
         const exportBtn = document.createElement("button");
-        exportBtn.className = "vnccs-ps-btn";
-        exportBtn.innerHTML = '<span class="vnccs-ps-btn-icon">📥</span> Export';
+        exportBtn.className = "aps-btn";
+        exportBtn.innerHTML = '<span class="aps-btn-icon">📥</span> Export';
         exportBtn.addEventListener("click", () => this.showExportModal());
 
         const importBtn = document.createElement("button");
-        importBtn.className = "vnccs-ps-btn";
-        importBtn.innerHTML = '<span class="vnccs-ps-btn-icon">📤</span> Import';
+        importBtn.className = "aps-btn";
+        importBtn.innerHTML = '<span class="aps-btn-icon">📤</span> Import';
         importBtn.addEventListener("click", () => this.importPose());
 
         const refBtn = document.createElement("button");
-        refBtn.className = "vnccs-ps-btn";
-        refBtn.innerHTML = '<span class="vnccs-ps-btn-icon">🖼️</span> Background';
+        refBtn.className = "aps-btn";
+        refBtn.innerHTML = '<span class="aps-btn-icon">🖼️</span> Background';
         refBtn.title = "Load or Remove Background Image";
         refBtn.onclick = () => {
             if (this.viewer && this.viewer.hasReferenceImage()) {
                 this.viewer.removeReferenceImage();
                 this.exportParams.background_url = null;
                 this.syncToNode(false);
-                refBtn.innerHTML = '<span class="vnccs-ps-btn-icon">🖼️</span> Background';
+                refBtn.innerHTML = '<span class="aps-btn-icon">🖼️</span> Background';
                 refBtn.classList.remove('danger');
             } else {
                 this.loadReference();
@@ -1801,8 +1890,8 @@ class PoseStudioWidget {
         this.refBtn = refBtn;
 
         const settingsBtn = document.createElement("button");
-        settingsBtn.className = "vnccs-ps-btn";
-        settingsBtn.innerHTML = '<span class="vnccs-ps-btn-icon">⚙️</span>';
+        settingsBtn.className = "aps-btn";
+        settingsBtn.innerHTML = '<span class="aps-btn-icon">⚙️</span>';
         settingsBtn.title = "Settings (Debug)";
         settingsBtn.onclick = () => this.showSettingsModal();
         this.settingsBtn = settingsBtn;
@@ -1822,6 +1911,12 @@ class PoseStudioWidget {
         this.fileImportInput = fileInput;
         this.container.appendChild(fileInput);
 
+        const poseInitializerInput = document.createElement("input");
+        poseInitializerInput.type = "file"; poseInitializerInput.accept = ".png,.jpg,.jpeg,.webp,image/*"; poseInitializerInput.style.display = "none";
+        poseInitializerInput.addEventListener("change", (e) => this.handlePoseInitializerImport(e));
+        this.poseInitializerInput = poseInitializerInput;
+        this.container.appendChild(poseInitializerInput);
+
         const refInput = document.createElement("input");
         refInput.type = "file"; refInput.accept = "image/*"; refInput.style.display = "none";
         refInput.addEventListener("change", (e) => this.handleRefImport(e));
@@ -1836,10 +1931,10 @@ class PoseStudioWidget {
         const libBtnWrap = document.createElement("div");
         libBtnWrap.style.paddingBottom = "5px";
         const libBtn = document.createElement("button");
-        libBtn.className = "vnccs-ps-btn primary";
+        libBtn.className = "aps-btn primary";
         libBtn.style.width = "100%";
         libBtn.style.padding = "10px";
-        libBtn.innerHTML = '<span class="vnccs-ps-btn-icon">📚</span> Pose Library Gallery';
+        libBtn.innerHTML = '<span class="aps-btn-icon">📚</span> Pose Library Gallery';
         libBtn.onclick = () => this.showLibraryModal();
         libBtnWrap.appendChild(libBtn);
         rightSidebar.appendChild(libBtnWrap);
@@ -1847,10 +1942,10 @@ class PoseStudioWidget {
         // Lighting Section
         const lightSection = this.createSection("Lighting", true);
         this.lightListContainer = document.createElement("div");
-        this.lightListContainer.className = "vnccs-ps-light-list";
+        this.lightListContainer.className = "aps-light-list";
 
         const overrideBtn = document.createElement("button");
-        overrideBtn.className = "vnccs-ps-btn full";
+        overrideBtn.className = "aps-btn full";
         overrideBtn.style.marginBottom = "12px";
         overrideBtn.style.height = "36px";
         overrideBtn.style.fontSize = "11px";
@@ -1883,15 +1978,15 @@ class PoseStudioWidget {
         lightSection.content.appendChild(overrideBtn);
 
         const lightToolbar = document.createElement("div");
-        lightToolbar.className = "vnccs-ps-light-header";
+        lightToolbar.className = "aps-light-header";
         lightToolbar.style.padding = "0 0 8px 0";
 
         const lightLabel = document.createElement("span");
-        lightLabel.className = "vnccs-ps-label";
+        lightLabel.className = "aps-label";
         lightLabel.innerText = "Scene Lights";
 
         const resetLightBtn = document.createElement("button");
-        resetLightBtn.className = "vnccs-ps-reset-btn";
+        resetLightBtn.className = "aps-reset-btn";
         resetLightBtn.innerHTML = "↺";
         resetLightBtn.onclick = () => {
             this.lightParams = [
@@ -1911,7 +2006,7 @@ class PoseStudioWidget {
         // Prompt Section
         const promptSection = this.createSection("Prompt", true);
         const promptArea = document.createElement("textarea");
-        promptArea.className = "vnccs-ps-textarea";
+        promptArea.className = "aps-textarea";
         promptArea.placeholder = "Describe your scene/character details...";
         promptArea.value = this.exportParams.user_prompt || "";
 
@@ -1935,12 +2030,13 @@ class PoseStudioWidget {
     _setupFinalUI() {
         // Loading Overlay
         this.loadingOverlay = document.createElement("div");
-        this.loadingOverlay.className = "vnccs-ps-loading-overlay";
+        this.loadingOverlay.className = "aps-loading-overlay";
         this.loadingOverlay.innerHTML = `
-            <div class="vnccs-ps-loading-spinner"></div>
-            <div class="vnccs-ps-loading-text">Loading Model...</div>
+            <div class="aps-loading-spinner"></div>
+            <div class="aps-loading-text">Loading Model...</div>
         `;
         this.container.appendChild(this.loadingOverlay);
+        this.loadingTextEl = this.loadingOverlay.querySelector(".aps-loading-text");
 
         this.refreshLightUI();
 
@@ -1960,33 +2056,38 @@ class PoseStudioWidget {
                     zoom: this.exportParams.cam_zoom
                 });
                 this.syncToNode();
+            },
+            onCharacterSelectionChange: () => {
+                this.refreshCharacterList();
+                if (!this._restoringSceneCharacters) this.syncToNode(false);
             }
         });
 
-        this.viewer.init();
+        this.viewerReadyPromise = this.viewer.init();
         if (this.lightParams) {
             this.viewer.updateLights(this.lightParams);
         }
+        this.setPointGizmoMode(this.pointGizmoMode || "rotate");
     }
 
     // === UI Helper Methods ===
 
     createSection(title, expanded = true) {
         const section = document.createElement("div");
-        section.className = "vnccs-ps-section" + (expanded ? "" : " collapsed");
+        section.className = "aps-section" + (expanded ? "" : " collapsed");
 
         const header = document.createElement("div");
-        header.className = "vnccs-ps-section-header";
+        header.className = "aps-section-header";
         header.innerHTML = `
-            <span class="vnccs-ps-section-title">${title}</span>
-            <span class="vnccs-ps-section-toggle">▼</span>
+            <span class="aps-section-title">${title}</span>
+            <span class="aps-section-toggle">▼</span>
         `;
         header.addEventListener("click", () => {
             section.classList.toggle("collapsed");
         });
 
         const content = document.createElement("div");
-        content.className = "vnccs-ps-section-content";
+        content.className = "aps-section-content";
 
         section.appendChild(header);
         section.appendChild(content);
@@ -1996,10 +2097,10 @@ class PoseStudioWidget {
 
     createSliderField(label, key, min, max, step, defaultValue, target, isExport = false) {
         const field = document.createElement("div");
-        field.className = "vnccs-ps-field";
+        field.className = "aps-field";
 
         const labelRow = document.createElement("div");
-        labelRow.className = "vnccs-ps-label-row";
+        labelRow.className = "aps-label-row";
         labelRow.style.display = "flex";
         labelRow.style.justifyContent = "space-between";
         labelRow.style.alignItems = "center";
@@ -2012,11 +2113,11 @@ class PoseStudioWidget {
         valueRow.style.gap = "6px";
 
         const valueSpan = document.createElement("span");
-        valueSpan.className = "vnccs-ps-value";
+        valueSpan.className = "aps-value";
         valueSpan.innerText = displayVal;
 
         const resetBtn = document.createElement("button");
-        resetBtn.className = "vnccs-ps-reset-btn";
+        resetBtn.className = "aps-reset-btn";
         resetBtn.innerHTML = "↺";
         resetBtn.title = `Reset to ${defaultValue}`;
 
@@ -2025,7 +2126,7 @@ class PoseStudioWidget {
 
         // Label Side
         const labelEl = document.createElement("span");
-        labelEl.className = "vnccs-ps-label";
+        labelEl.className = "aps-label";
         labelEl.innerText = label;
 
         labelRow.innerHTML = '';
@@ -2033,11 +2134,11 @@ class PoseStudioWidget {
         labelRow.appendChild(valueRow);
 
         const wrap = document.createElement("div");
-        wrap.className = "vnccs-ps-slider-wrap";
+        wrap.className = "aps-slider-wrap";
 
         const slider = document.createElement("input");
         slider.type = "range";
-        slider.className = "vnccs-ps-slider";
+        slider.className = "aps-slider";
         slider.min = min;
         slider.max = max;
         slider.step = step;
@@ -2110,15 +2211,15 @@ class PoseStudioWidget {
 
     createInputField(label, key, type, min, max, step) {
         const field = document.createElement("div");
-        field.className = "vnccs-ps-field";
+        field.className = "aps-field";
 
         const labelEl = document.createElement("div");
-        labelEl.className = "vnccs-ps-label";
+        labelEl.className = "aps-label";
         labelEl.innerText = label;
 
         const input = document.createElement("input");
         input.type = type;
-        input.className = "vnccs-ps-input";
+        input.className = "aps-input";
         input.min = min;
         input.max = max;
         input.step = step;
@@ -2149,14 +2250,14 @@ class PoseStudioWidget {
 
     createSelectField(label, key, options) {
         const field = document.createElement("div");
-        field.className = "vnccs-ps-field";
+        field.className = "aps-field";
 
         const labelEl = document.createElement("div");
-        labelEl.className = "vnccs-ps-label";
+        labelEl.className = "aps-label";
         labelEl.innerText = label;
 
         const select = document.createElement("select");
-        select.className = "vnccs-ps-select";
+        select.className = "aps-select";
 
         options.forEach(opt => {
             const el = document.createElement("option");
@@ -2180,7 +2281,7 @@ class PoseStudioWidget {
 
     createCameraRadar(section) {
         const wrap = document.createElement("div");
-        wrap.className = "vnccs-ps-radar-wrap";
+        wrap.className = "aps-radar-wrap";
         wrap.style.display = "flex";
         wrap.style.flexDirection = "column";
         wrap.style.alignItems = "center";
@@ -2383,10 +2484,10 @@ class PoseStudioWidget {
 
         // Recenter Button
         const recenterBtn = document.createElement("button");
-        recenterBtn.className = "vnccs-ps-btn";
+        recenterBtn.className = "aps-btn";
         recenterBtn.style.marginTop = "8px";
         recenterBtn.style.width = "100%";
-        recenterBtn.innerHTML = '<span class="vnccs-ps-btn-icon">⌖</span> Re-center';
+        recenterBtn.innerHTML = '<span class="aps-btn-icon">⌖</span> Re-center';
         recenterBtn.onclick = () => {
             this.exportParams.cam_offset_x = 0;
             this.exportParams.cam_offset_y = 0;
@@ -2404,10 +2505,10 @@ class PoseStudioWidget {
 
         // Sync Tabs Button
         const syncTabsBtn = document.createElement("button");
-        syncTabsBtn.className = "vnccs-ps-btn vnccs-ps-btn--sync-tabs";
+        syncTabsBtn.className = "aps-btn aps-btn--sync-tabs";
         syncTabsBtn.style.marginTop = "6px";
         syncTabsBtn.style.width = "100%";
-        syncTabsBtn.innerHTML = '<span class="vnccs-ps-btn-icon">⇄</span> Sync Zoom to All Tabs';
+        syncTabsBtn.innerHTML = '<span class="aps-btn-icon">⇄</span> Sync Zoom to All Tabs';
         syncTabsBtn.style.display = "none"; // Hidden by default
         syncTabsBtn.onclick = () => {
             const currentZoom = this.exportParams.cam_zoom;
@@ -2447,7 +2548,7 @@ class PoseStudioWidget {
         const canvas = document.createElement("canvas");
         canvas.width = size;
         canvas.height = size;
-        canvas.className = "vnccs-ps-light-radar-canvas";
+        canvas.className = "aps-light-radar-canvas";
         const ctx = canvas.getContext("2d");
 
         let isDragging = false;
@@ -2572,15 +2673,15 @@ class PoseStudioWidget {
 
     createColorField(label, key) {
         const field = document.createElement("div");
-        field.className = "vnccs-ps-field";
+        field.className = "aps-field";
 
         const labelEl = document.createElement("div");
-        labelEl.className = "vnccs-ps-label";
+        labelEl.className = "aps-label";
         labelEl.innerText = label;
 
         const input = document.createElement("input");
         input.type = "color";
-        input.className = "vnccs-ps-color";
+        input.className = "aps-color";
 
         // Convert RGB to Hex
         const rgb = this.exportParams[key];
@@ -2616,7 +2717,7 @@ class PoseStudioWidget {
 
         for (let i = 0; i < this.poses.length; i++) {
             const tab = document.createElement("button");
-            tab.className = "vnccs-ps-tab" + (i === this.activeTab ? " active" : "");
+            tab.className = "aps-tab" + (i === this.activeTab ? " active" : "");
 
             const text = document.createElement("span");
             text.innerText = `Pose ${i + 1}`;
@@ -2624,7 +2725,7 @@ class PoseStudioWidget {
 
             if (this.poses.length > 1) {
                 const close = document.createElement("span");
-                close.className = "vnccs-ps-tab-close";
+                close.className = "aps-tab-close";
                 close.innerText = "×";
 
                 close.onclick = (e) => {
@@ -2641,7 +2742,7 @@ class PoseStudioWidget {
         // Add button (max 12)
         if (this.poses.length < 12) {
             const addBtn = document.createElement("button");
-            addBtn.className = "vnccs-ps-tab-add";
+            addBtn.className = "aps-tab-add";
             addBtn.innerText = "+";
             addBtn.addEventListener("click", () => this.addTab());
             this.tabsContainer.appendChild(addBtn);
@@ -2819,17 +2920,17 @@ class PoseStudioWidget {
     showExportModal() {
         // Create modal structure
         const overlay = document.createElement("div");
-        overlay.className = "vnccs-ps-modal-overlay";
+        overlay.className = "aps-modal-overlay";
 
         const modal = document.createElement("div");
-        modal.className = "vnccs-ps-modal";
+        modal.className = "aps-modal";
 
         const title = document.createElement("div");
-        title.className = "vnccs-ps-modal-title";
+        title.className = "aps-modal-title";
         title.innerText = "Export Pose Data";
 
         const content = document.createElement("div");
-        content.className = "vnccs-ps-modal-content";
+        content.className = "aps-modal-content";
 
         const inputRow = document.createElement("div");
         inputRow.style.marginBottom = "10px";
@@ -2837,14 +2938,14 @@ class PoseStudioWidget {
         const nameInput = document.createElement("input");
         nameInput.type = "text";
         nameInput.placeholder = "Filename (optional)";
-        nameInput.className = "vnccs-ps-input";
+        nameInput.className = "aps-input";
         nameInput.style.width = "100%";
         nameInput.style.marginBottom = "5px";
 
         inputRow.appendChild(nameInput);
 
         const btnSingle = document.createElement("button");
-        btnSingle.className = "vnccs-ps-modal-btn";
+        btnSingle.className = "aps-modal-btn";
         btnSingle.innerText = "Current Pose Only";
         btnSingle.onclick = () => {
             this.exportPose('single', nameInput.value);
@@ -2852,7 +2953,7 @@ class PoseStudioWidget {
         };
 
         const btnSet = document.createElement("button");
-        btnSet.className = "vnccs-ps-modal-btn";
+        btnSet.className = "aps-modal-btn";
         btnSet.innerText = "All Poses (Set)";
         btnSet.onclick = () => {
             this.exportPose('set', nameInput.value);
@@ -2860,7 +2961,7 @@ class PoseStudioWidget {
         };
 
         const btnCancel = document.createElement("button");
-        btnCancel.className = "vnccs-ps-modal-btn cancel";
+        btnCancel.className = "aps-modal-btn cancel";
         btnCancel.innerText = "Cancel";
         btnCancel.onclick = () => {
             this.container.removeChild(overlay);
@@ -2923,6 +3024,1102 @@ class PoseStudioWidget {
         }
     }
 
+    setBusyState(enabled, message = "Loading Model...") {
+        if (this.loadingTextEl) this.loadingTextEl.textContent = message;
+        if (this.loadingOverlay) this.loadingOverlay.style.display = enabled ? "flex" : "none";
+    }
+
+    setPoseInitializerBusy(enabled, message = "Initializing Pose...") {
+        this.poseInitializerBusy = enabled;
+        if (this.poseInitializerBtn) {
+            this.poseInitializerBtn.disabled = enabled;
+            this.poseInitializerBtn.style.opacity = enabled ? "0.65" : "";
+            this.poseInitializerBtn.style.cursor = enabled ? "wait" : "";
+        }
+        this.setBusyState(enabled, message);
+    }
+
+    openPoseInitializer() {
+        if (this.poseInitializerBusy) return;
+        if (!this.viewer || !this.viewer.isInitialized()) {
+            this.showMessage("Load a character before initializing a pose.", true);
+            return;
+        }
+        if (this.characterMoveMode) {
+            this.setCharacterMoveMode(false);
+        }
+        this.showPoseInitializerModeModal();
+    }
+
+    showPoseInitializerModeModal() {
+        const overlay = document.createElement("div");
+        overlay.className = "aps-modal-overlay";
+        overlay.style.zIndex = "1200";
+
+        const modal = document.createElement("div");
+        modal.className = "aps-modal";
+        modal.style.width = "min(520px, 94%)";
+
+        const title = document.createElement("div");
+        title.className = "aps-modal-title";
+        title.textContent = "Pose Initializer";
+
+        const content = document.createElement("div");
+        content.className = "aps-modal-content";
+        content.style.gap = "12px";
+
+        const intro = document.createElement("div");
+        intro.style.color = "var(--ps-text-muted)";
+        intro.style.lineHeight = "1.45";
+        intro.textContent = "Choose how the uploaded image should be processed before the skeleton preview opens.";
+        content.appendChild(intro);
+
+        const singleCard = document.createElement("button");
+        singleCard.className = "aps-modal-btn primary";
+        singleCard.style.justifyContent = "flex-start";
+        singleCard.style.alignItems = "flex-start";
+        singleCard.style.flexDirection = "column";
+        singleCard.style.gap = "6px";
+        singleCard.innerHTML = `
+            <strong>Single Angle</strong>
+            <span style="font-size:11px; color:rgba(255,255,255,0.72); line-height:1.35;">
+                Detect OpenPose on the uploaded image only. This is faster and best when the full body is clear.
+            </span>
+        `;
+
+        const multiCard = document.createElement("button");
+        multiCard.className = "aps-modal-btn";
+        multiCard.style.justifyContent = "flex-start";
+        multiCard.style.alignItems = "flex-start";
+        multiCard.style.flexDirection = "column";
+        multiCard.style.gap = "6px";
+        multiCard.innerHTML = `
+            <strong>Multi Angle</strong>
+            <span style="font-size:11px; color:rgba(255,255,255,0.72); line-height:1.35;">
+                Generate additional camera angles with Qwen Image Edit, detect skeletons on each view, then combine them to improve the 3D pose. This can take significantly longer.
+            </span>
+        `;
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "aps-modal-btn cancel";
+        cancelBtn.textContent = "Cancel";
+
+        const chooseMode = (mode) => {
+            overlay.remove();
+            this.pendingPoseInitializerMode = mode;
+            if (this.poseInitializerInput) {
+                this.poseInitializerInput.value = "";
+                this.poseInitializerInput.click();
+            }
+        };
+
+        singleCard.onclick = () => chooseMode("single");
+        multiCard.onclick = () => chooseMode("multi");
+        cancelBtn.onclick = () => {
+            this.pendingPoseInitializerMode = null;
+            overlay.remove();
+        };
+        overlay.onclick = (e) => {
+            if (e.target === overlay) {
+                this.pendingPoseInitializerMode = null;
+                overlay.remove();
+            }
+        };
+
+        content.appendChild(singleCard);
+        content.appendChild(multiCard);
+        content.appendChild(cancelBtn);
+        modal.appendChild(title);
+        modal.appendChild(content);
+        overlay.appendChild(modal);
+        this.container.appendChild(overlay);
+    }
+
+    async buildSingleAnglePoseInitializerView(img, dataUrl) {
+        this.setPoseInitializerBusy(true, "Detecting Skeleton...");
+        const detection = await this.detectPoseInitializerKeypoints({ image: img, dataUrl });
+        if (!detection?.keypoints) return null;
+        return {
+            label: "Original",
+            image: img,
+            dataUrl,
+            keypoints: detection.keypoints,
+            depthSamples: detection.depthSamples || null
+        };
+    }
+
+    handlePoseInitializerImport(e) {
+        const file = e.target.files[0];
+        const mode = this.pendingPoseInitializerMode || "single";
+        this.pendingPoseInitializerMode = null;
+        if (!file) return;
+
+        const isImageFile = file.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(file.name || "");
+        if (!isImageFile) {
+            this.showMessage("Pose Initializer expects an image file.", true);
+            e.target.value = "";
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const img = new Image();
+            img.onload = async () => {
+                this.setPoseInitializerBusy(true, mode === "multi" ? "Generating Angles..." : "Detecting Skeleton...");
+                try {
+                    const views = mode === "multi"
+                        ? await this.buildMultiAnglePoseInitializerViews(img, event.target.result)
+                        : [await this.buildSingleAnglePoseInitializerView(img, event.target.result)].filter(Boolean);
+                    this.setPoseInitializerBusy(false);
+                    if (views.length > 1) {
+                        this.showMultiAnglePoseInitializerPreview({ views, preserveCamera: true });
+                    } else if (views[0]?.keypoints) {
+                        this.showPoseInitializerPreview({
+                            image: views[0].image,
+                            keypoints: views[0].keypoints,
+                            depthSamples: views[0].depthSamples,
+                            preserveCamera: true
+                        });
+                    }
+                } finally {
+                    this.setPoseInitializerBusy(false);
+                }
+            };
+            img.onerror = () => {
+                this.setPoseInitializerBusy(false);
+                this.showMessage("Failed to load pose initializer image.", true);
+            };
+            img.src = event.target.result;
+            e.target.value = "";
+        };
+        reader.onerror = () => {
+            this.setPoseInitializerBusy(false);
+            this.showMessage("Failed to read pose initializer image.", true);
+            e.target.value = "";
+        };
+        this.setPoseInitializerBusy(true, "Loading Image...");
+        reader.readAsDataURL(file);
+    }
+
+    loadImageFromDataUrl(dataUrl) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("Failed to load generated angle image."));
+            img.src = dataUrl;
+        });
+    }
+
+    async generateQwenMultiAngleImages(dataUrl) {
+        const jobId = `advanced_pose_studio_multi_angle_${this.node?.id || "node"}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        this.startQwenMultiAngleProgressPolling(jobId);
+        try {
+            const res = await fetch("/advanced_pose_studio/qwen_multi_angle", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    job_id: jobId,
+                    image: dataUrl,
+                    prompts: [
+                        "Rotate camera 45 degrees left. Preserve the exact person, clothing, body pose, limb positions, proportions, and background as much as possible.",
+                        "Rotate camera 45 degrees right. Preserve the exact person, clothing, body pose, limb positions, proportions, and background as much as possible.",
+                        "Rotate camera 90 degrees left side view. Preserve the exact person, clothing, body pose, limb positions, proportions, and background as much as possible."
+                    ]
+                })
+            });
+            const payload = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(payload?.error || `Qwen multi-angle workflow failed (${res.status}).`);
+            return (payload?.images || []).filter(item => item?.image);
+        } finally {
+            this.stopQwenMultiAngleProgressPolling();
+        }
+    }
+
+    startQwenMultiAngleProgressPolling(jobId) {
+        this.stopQwenMultiAngleProgressPolling();
+        this.qwenMultiAngleProgressJobId = jobId;
+        const poll = async () => {
+            if (this.qwenMultiAngleProgressJobId !== jobId) return;
+            try {
+                const res = await fetch(`/advanced_pose_studio/qwen_multi_angle_progress/${encodeURIComponent(jobId)}`);
+                if (!res.ok) return;
+                const state = await res.json();
+                if (this.qwenMultiAngleProgressJobId !== jobId) return;
+                if (state?.message) {
+                    const pct = Number.isFinite(Number(state.percent)) ? ` ${Math.round(Number(state.percent))}%` : "";
+                    this.setPoseInitializerBusy(true, `${state.message}${pct}`);
+                }
+            } catch (_) {
+                // Progress polling is best-effort; generation continues without it.
+            }
+        };
+        poll();
+        this.qwenMultiAngleProgressTimer = setInterval(poll, 750);
+    }
+
+    stopQwenMultiAngleProgressPolling() {
+        if (this.qwenMultiAngleProgressTimer) {
+            clearInterval(this.qwenMultiAngleProgressTimer);
+            this.qwenMultiAngleProgressTimer = null;
+        }
+        this.qwenMultiAngleProgressJobId = null;
+    }
+
+    async buildMultiAnglePoseInitializerViews(originalImage, originalDataUrl) {
+        const views = [{
+            label: "Original",
+            image: originalImage,
+            dataUrl: originalDataUrl,
+            keypoints: null,
+            depthSamples: null
+        }];
+
+        let generated = [];
+        try {
+            generated = await this.generateQwenMultiAngleImages(originalDataUrl);
+        } catch (e) {
+            console.warn("[Advanced Pose Studio] Qwen multi-angle failed, falling back to original image:", e);
+            this.showMessage(`Multi-angle generation failed, using original image only. ${e?.message || e}`, true);
+        }
+
+        this.setPoseInitializerBusy(true, "Detecting Skeletons...");
+        for (const item of generated.slice(0, 3)) {
+            try {
+                const image = await this.loadImageFromDataUrl(item.image);
+                views.push({
+                    label: item.label || `Angle ${views.length}`,
+                    image,
+                    dataUrl: item.image,
+                    keypoints: null,
+                    depthSamples: null
+                });
+            } catch (e) {
+                console.warn("[Advanced Pose Studio] Failed to load generated angle:", e);
+            }
+        }
+
+        for (const view of views) {
+            try {
+                const detection = await this.detectPoseInitializerKeypoints({ image: view.image, dataUrl: view.dataUrl });
+                view.keypoints = detection?.keypoints || null;
+                view.depthSamples = detection?.depthSamples || null;
+            } catch (e) {
+                console.warn("[Advanced Pose Studio] Failed to detect generated angle skeleton:", e);
+            }
+        }
+
+        return views.filter(view => view.keypoints);
+    }
+
+    async detectPoseInitializerKeypoints(source) {
+        const img = source?.image || source;
+        const dataUrl = source?.dataUrl || null;
+        let keypoints = null;
+        let depthSamples = null;
+        let detectorError = null;
+
+        if (dataUrl) {
+            try {
+                const detection = await this.detectOpenPoseFromImageDataUrl(dataUrl);
+                keypoints = detection.keypoints;
+                depthSamples = detection.depthSamples;
+            } catch (e) {
+                detectorError = e?.message || String(e);
+                console.warn("[Advanced Pose Studio] OpenPose detector failed:", e);
+            }
+        }
+
+        if (!keypoints && img) {
+            keypoints = extractKeypointsFromImage(img);
+        }
+
+        if (!keypoints) {
+            const suffix = detectorError ? ` ${detectorError}` : "";
+            this.showMessage(`Could not convert image to OpenPose keypoints.${suffix}`, true);
+            return null;
+        }
+
+        return { keypoints, depthSamples };
+    }
+
+    async applyOpenPoseImageToSelectedCharacter(source, options = {}) {
+        if (!this.viewer || !this.viewer.isInitialized()) {
+            this.showMessage("Load a character before initializing a pose.", true);
+            return false;
+        }
+
+        const detection = source?.keypoints ? source : await this.detectPoseInitializerKeypoints(source);
+        if (!detection?.keypoints) return false;
+        const keypoints = detection.keypoints;
+        const depthSamples = detection.depthSamples;
+
+        return this.applyParsedOpenPoseToSelectedCharacter(keypoints, depthSamples, options);
+    }
+
+    applyParsedOpenPoseToSelectedCharacter(keypoints, depthSamples = null, options = {}) {
+        if (!this.viewer || !this.viewer.isInitialized()) {
+            this.showMessage("Load a character before initializing a pose.", true);
+            return false;
+        }
+        keypoints = this.filterCroppedOpenPoseParts(keypoints);
+        const poseData = convertOpenPoseToPose(keypoints, this.viewer);
+        if (!poseData) {
+            this.showMessage("Failed to convert OpenPose keypoints to pose.", true);
+            return false;
+        }
+
+        if (this.viewer.recordState) this.viewer.recordState();
+        this.poses[this.activeTab] = poseData;
+        this.viewer.setPose(poseData, options.preserveCamera !== false);
+        if (this.viewer.apply2DSkeletonIKInitializer) {
+            this.viewer.apply2DSkeletonIKInitializer(keypoints);
+            this.poses[this.activeTab] = this.viewer.getPose();
+        }
+        if (depthSamples && this.viewer.applyDepthPoseInitializer) {
+            this.viewer.applyDepthPoseInitializer(keypoints, depthSamples);
+            this.poses[this.activeTab] = this.viewer.getPose();
+        }
+        this.updateRotationSliders();
+        this.refreshCharacterList();
+        this.syncToNode(false);
+        this.showMessage(options.successMessage || "OpenPose image imported successfully.");
+        return true;
+    }
+
+    showPoseInitializerPreview({ image, keypoints, depthSamples = null, preserveCamera = true, onApply = null }) {
+        if (!image || !keypoints?.joints) return;
+
+        const working = this.cloneOpenPoseKeypoints(this.filterCroppedOpenPoseParts(keypoints));
+        const original = this.cloneOpenPoseKeypoints(working);
+        const overlay = document.createElement("div");
+        overlay.className = "aps-modal-overlay";
+        overlay.style.zIndex = "1200";
+
+        const modal = document.createElement("div");
+        modal.className = "aps-modal";
+        modal.style.width = "min(920px, 96%)";
+        modal.style.maxHeight = "92%";
+
+        const title = document.createElement("div");
+        title.className = "aps-modal-title";
+        title.textContent = "Pose Initializer Preview";
+
+        const body = document.createElement("div");
+        body.style.display = "grid";
+        body.style.gridTemplateColumns = "minmax(0, 1fr) 180px";
+        body.style.gap = "12px";
+        body.style.padding = "12px";
+        body.style.overflow = "auto";
+
+        const canvasWrap = document.createElement("div");
+        canvasWrap.style.display = "flex";
+        canvasWrap.style.alignItems = "center";
+        canvasWrap.style.justifyContent = "center";
+        canvasWrap.style.minHeight = "280px";
+        canvasWrap.style.background = "rgba(0,0,0,0.25)";
+        canvasWrap.style.border = "1px solid var(--ps-border)";
+        canvasWrap.style.borderRadius = "6px";
+
+        const canvas = document.createElement("canvas");
+        canvas.style.maxWidth = "100%";
+        canvas.style.height = "auto";
+        canvas.style.cursor = "grab";
+        canvasWrap.appendChild(canvas);
+
+        const controls = document.createElement("div");
+        controls.style.display = "flex";
+        controls.style.flexDirection = "column";
+        controls.style.gap = "8px";
+
+        const addButton = (text, onClick, className = "aps-btn") => {
+            const btn = document.createElement("button");
+            btn.className = className;
+            btn.textContent = text;
+            btn.onclick = onClick;
+            controls.appendChild(btn);
+            return btn;
+        };
+
+        const drawState = {
+            scale: 1,
+            offsetX: 0,
+            offsetY: 0,
+            activeJoint: null,
+            activeKind: "body",
+            activeIndex: -1,
+            showHands: true,
+            showFace: true
+        };
+
+        const skeletonEdges = [
+            ["neck", "nose"],
+            ["neck", "l_shoulder"], ["l_shoulder", "l_elbow"], ["l_elbow", "l_wrist"],
+            ["neck", "r_shoulder"], ["r_shoulder", "r_elbow"], ["r_elbow", "r_wrist"],
+            ["neck", "mid_hip"], ["mid_hip", "l_hip"], ["l_hip", "l_knee"], ["l_knee", "l_ankle"],
+            ["mid_hip", "r_hip"], ["r_hip", "r_knee"], ["r_knee", "r_ankle"]
+        ];
+        const draggableJoints = [
+            "nose", "neck", "mid_hip",
+            "l_shoulder", "l_elbow", "l_wrist", "r_shoulder", "r_elbow", "r_wrist",
+            "l_hip", "l_knee", "l_ankle", "r_hip", "r_knee", "r_ankle"
+        ];
+        const limbGroups = {
+            "Left Arm": ["l_elbow", "l_wrist"],
+            "Right Arm": ["r_elbow", "r_wrist"],
+            "Left Leg": ["l_knee", "l_ankle"],
+            "Right Leg": ["r_knee", "r_ankle"]
+        };
+        const handEdges = [
+            [0, 1], [1, 2], [2, 3], [3, 4],
+            [0, 5], [5, 6], [6, 7], [7, 8],
+            [0, 9], [9, 10], [10, 11], [11, 12],
+            [0, 13], [13, 14], [14, 15], [15, 16],
+            [0, 17], [17, 18], [18, 19], [19, 20]
+        ];
+        const faceEdges = [
+            ...Array.from({ length: 16 }, (_, i) => [i, i + 1]),
+            ...Array.from({ length: 4 }, (_, i) => [17 + i, 18 + i]),
+            ...Array.from({ length: 4 }, (_, i) => [22 + i, 23 + i]),
+            ...Array.from({ length: 3 }, (_, i) => [27 + i, 28 + i]),
+            [31, 32], [32, 33], [33, 34], [34, 35],
+            ...Array.from({ length: 5 }, (_, i) => [36 + i, 37 + i]), [41, 36],
+            ...Array.from({ length: 5 }, (_, i) => [42 + i, 43 + i]), [47, 42],
+            ...Array.from({ length: 11 }, (_, i) => [48 + i, 49 + i]), [59, 48],
+            ...Array.from({ length: 7 }, (_, i) => [60 + i, 61 + i]), [67, 60]
+        ];
+        const limbSpecs = {
+            leftArm: {
+                names: ["l_shoulder", "l_elbow", "l_wrist"],
+                mirror: ["r_shoulder", "r_elbow", "r_wrist"],
+                anchor: "neck",
+                side: -1,
+                type: "arm"
+            },
+            rightArm: {
+                names: ["r_shoulder", "r_elbow", "r_wrist"],
+                mirror: ["l_shoulder", "l_elbow", "l_wrist"],
+                anchor: "neck",
+                side: 1,
+                type: "arm"
+            },
+            leftLeg: {
+                names: ["l_hip", "l_knee", "l_ankle"],
+                mirror: ["r_hip", "r_knee", "r_ankle"],
+                anchor: "mid_hip",
+                side: -1,
+                type: "leg"
+            },
+            rightLeg: {
+                names: ["r_hip", "r_knee", "r_ankle"],
+                mirror: ["l_hip", "l_knee", "l_ankle"],
+                anchor: "mid_hip",
+                side: 1,
+                type: "leg"
+            }
+        };
+
+        const resizeCanvas = () => {
+            const maxW = Math.min(680, Math.max(320, this.container?.clientWidth ? this.container.clientWidth - 260 : 680));
+            const maxH = 640;
+            const scale = Math.min(maxW / image.naturalWidth, maxH / image.naturalHeight, 1);
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+            drawState.scale = canvas.width / Math.max(1, image.naturalWidth);
+        };
+
+        const jointVisible = (name) => working.joints[name] && Number(working.joints[name].c || 0) > 0.05;
+        const coordWidth = () => Math.max(1, Number(working.canvasWidth || image.naturalWidth || 512));
+        const coordHeight = () => Math.max(1, Number(working.canvasHeight || image.naturalHeight || 512));
+        const toCanvas = (joint) => ({ x: (joint.x / coordWidth()) * canvas.width, y: (joint.y / coordHeight()) * canvas.height });
+        const fromCanvas = (x, y) => ({
+            x: Math.max(0, Math.min(coordWidth(), (x / canvas.width) * coordWidth())),
+            y: Math.max(0, Math.min(coordHeight(), (y / canvas.height) * coordHeight()))
+        });
+        const pointVisible = (point) => point && Number(point.c || 0) > 0.05;
+        const validJoint = (name) => working.joints[name] && Number(working.joints[name].c || 0) > 0.05;
+        const ensureJoint = (name, x, y, c = 0.95) => {
+            working.joints[name] = {
+                ...(working.joints[name] || {}),
+                x: Math.max(0, Math.min(coordWidth(), x)),
+                y: Math.max(0, Math.min(coordHeight(), y)),
+                c
+            };
+        };
+        const copyOrFallbackPoint = (name, fallback) => {
+            const joint = working.joints[name];
+            if (validJoint(name)) return { x: joint.x, y: joint.y };
+            return fallback;
+        };
+        const addLimb = (specKey) => {
+            const spec = limbSpecs[specKey];
+            if (!spec) return;
+
+            const anchor = copyOrFallbackPoint(spec.anchor, { x: coordWidth() * 0.5, y: coordHeight() * 0.45 });
+            const shoulderSpan = validJoint("l_shoulder") && validJoint("r_shoulder")
+                ? Math.abs(working.joints.l_shoulder.x - working.joints.r_shoulder.x)
+                : coordWidth() * 0.22;
+            const hipSpan = validJoint("l_hip") && validJoint("r_hip")
+                ? Math.abs(working.joints.l_hip.x - working.joints.r_hip.x)
+                : coordWidth() * 0.12;
+
+            const mirrorPoints = spec.mirror.map((name) => working.joints[name]);
+            if (mirrorPoints.every((p) => p && Number(p.c || 0) > 0.05)) {
+                const mirrorAnchor = copyOrFallbackPoint(spec.anchor, anchor);
+                for (let i = 0; i < spec.names.length; i++) {
+                    const source = mirrorPoints[i];
+                    ensureJoint(spec.names[i], mirrorAnchor.x - (source.x - mirrorAnchor.x), source.y, 0.95);
+                }
+                draw();
+                return;
+            }
+
+            if (spec.type === "arm") {
+                const shoulderX = anchor.x + spec.side * shoulderSpan * 0.55;
+                const shoulderY = anchor.y + coordHeight() * 0.02;
+                ensureJoint(spec.names[0], shoulderX, shoulderY);
+                ensureJoint(spec.names[1], shoulderX + spec.side * shoulderSpan * 0.75, shoulderY + coordHeight() * 0.05);
+                ensureJoint(spec.names[2], shoulderX + spec.side * shoulderSpan * 1.25, shoulderY + coordHeight() * 0.02);
+            } else {
+                const hipX = anchor.x + spec.side * hipSpan * 0.55;
+                const hipY = anchor.y;
+                ensureJoint(spec.names[0], hipX, hipY);
+                ensureJoint(spec.names[1], hipX + spec.side * hipSpan * 0.25, hipY + coordHeight() * 0.23);
+                ensureJoint(spec.names[2], hipX + spec.side * hipSpan * 0.35, hipY + coordHeight() * 0.45);
+            }
+            draw();
+        };
+
+        const draw = () => {
+            const ctx = canvas.getContext("2d");
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+
+            for (const [a, b] of skeletonEdges) {
+                if (!jointVisible(a) || !jointVisible(b)) continue;
+                const pa = toCanvas(working.joints[a]);
+                const pb = toCanvas(working.joints[b]);
+                ctx.strokeStyle = "rgba(255, 170, 0, 0.9)";
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(pa.x, pa.y);
+                ctx.lineTo(pb.x, pb.y);
+                ctx.stroke();
+            }
+
+            const drawPointSet = (points, edges, color, handleRadius) => {
+                if (!points) return;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = Math.max(1, handleRadius * 0.7);
+                for (const [a, b] of edges) {
+                    if (!pointVisible(points[a]) || !pointVisible(points[b])) continue;
+                    const pa = toCanvas(points[a]);
+                    const pb = toCanvas(points[b]);
+                    ctx.beginPath();
+                    ctx.moveTo(pa.x, pa.y);
+                    ctx.lineTo(pb.x, pb.y);
+                    ctx.stroke();
+                }
+                for (let i = 0; i < points.length; i++) {
+                    if (!pointVisible(points[i])) continue;
+                    const p = toCanvas(points[i]);
+                    const active = drawState.activeKind !== "body" && drawState.activeIndex === i &&
+                        ((drawState.activeKind === "handLeft" && points === working.handLeft) ||
+                         (drawState.activeKind === "handRight" && points === working.handRight) ||
+                         (drawState.activeKind === "face" && points === working.face));
+                    ctx.fillStyle = active ? "#00ffff" : color;
+                    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, active ? handleRadius + 2 : handleRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            };
+
+            if (drawState.showHands) {
+                drawPointSet(working.handLeft, handEdges, "rgba(80, 220, 255, 0.9)", 3.5);
+                drawPointSet(working.handRight, handEdges, "rgba(80, 220, 255, 0.9)", 3.5);
+            }
+            if (drawState.showFace) {
+                drawPointSet(working.face, faceEdges, "rgba(184, 169, 232, 0.85)", 2.5);
+            }
+
+            for (const name of draggableJoints) {
+                if (!jointVisible(name)) continue;
+                const p = toCanvas(working.joints[name]);
+                const active = drawState.activeJoint === name;
+                ctx.fillStyle = active ? "#00ffff" : "#ff8fa3";
+                ctx.strokeStyle = "rgba(0,0,0,0.75)";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, active ? 8 : 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        };
+
+        const pickJoint = (x, y) => {
+            let best = null;
+            let bestDist = Infinity;
+            const consider = (kind, id, point, radius) => {
+                if (!pointVisible(point)) return;
+                const p = toCanvas(point);
+                const dx = p.x - x;
+                const dy = p.y - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < bestDist && dist <= radius) {
+                    best = { kind, id };
+                    bestDist = dist;
+                }
+            };
+            for (const name of draggableJoints) {
+                if (!jointVisible(name)) continue;
+                consider("body", name, working.joints[name], 16);
+            }
+            if (drawState.showHands) {
+                (working.handLeft || []).forEach((point, index) => consider("handLeft", index, point, 10));
+                (working.handRight || []).forEach((point, index) => consider("handRight", index, point, 10));
+            }
+            if (drawState.showFace) {
+                (working.face || []).forEach((point, index) => consider("face", index, point, 8));
+            }
+            return best;
+        };
+
+        const pointerPos = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const sx = canvas.width / rect.width;
+            const sy = canvas.height / rect.height;
+            return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+        };
+
+        canvas.addEventListener("pointerdown", (e) => {
+            const pos = pointerPos(e);
+            const joint = pickJoint(pos.x, pos.y);
+            if (!joint) return;
+            drawState.activeKind = joint.kind;
+            drawState.activeJoint = joint.kind === "body" ? joint.id : null;
+            drawState.activeIndex = joint.kind === "body" ? -1 : joint.id;
+            canvas.setPointerCapture(e.pointerId);
+            canvas.style.cursor = "grabbing";
+            draw();
+        });
+
+        canvas.addEventListener("pointermove", (e) => {
+            if (drawState.activeKind === "body" && !drawState.activeJoint) return;
+            if (drawState.activeKind !== "body" && drawState.activeIndex < 0) return;
+            const pos = pointerPos(e);
+            const mapped = fromCanvas(pos.x, pos.y);
+            let joint = null;
+            if (drawState.activeKind === "body") joint = working.joints[drawState.activeJoint];
+            if (drawState.activeKind === "handLeft") joint = working.handLeft?.[drawState.activeIndex];
+            if (drawState.activeKind === "handRight") joint = working.handRight?.[drawState.activeIndex];
+            if (drawState.activeKind === "face") joint = working.face?.[drawState.activeIndex];
+            if (!joint) return;
+            joint.x = mapped.x;
+            joint.y = mapped.y;
+            joint.c = Math.max(Number(joint.c || 0), 0.95);
+            draw();
+        });
+
+        const endDrag = (e) => {
+            if (drawState.activeJoint && e.pointerId !== undefined) {
+                try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+            }
+            drawState.activeJoint = null;
+            drawState.activeKind = "body";
+            drawState.activeIndex = -1;
+            canvas.style.cursor = "grab";
+            draw();
+        };
+        canvas.addEventListener("pointerup", endDrag);
+        canvas.addEventListener("pointercancel", endDrag);
+
+        addButton("Apply", () => {
+            const ok = onApply
+                ? onApply(this.cloneOpenPoseKeypoints(working), depthSamples)
+                : this.applyParsedOpenPoseToSelectedCharacter(working, depthSamples, {
+                    preserveCamera,
+                    successMessage: "Pose initialized from edited skeleton."
+                });
+            if (ok) overlay.remove();
+        }, "aps-btn primary");
+        addButton("Reset Detection", () => {
+            const reset = this.cloneOpenPoseKeypoints(original);
+            working.joints = reset.joints;
+            working.handLeft = reset.handLeft;
+            working.handRight = reset.handRight;
+            working.face = reset.face;
+            draw();
+        });
+        addButton("Disable Legs", () => {
+            ["l_knee", "l_ankle", "r_knee", "r_ankle"].forEach(name => { if (working.joints[name]) working.joints[name].c = 0; });
+            draw();
+        });
+        addButton("Disable Arms", () => {
+            ["l_elbow", "l_wrist", "r_elbow", "r_wrist"].forEach(name => { if (working.joints[name]) working.joints[name].c = 0; });
+            draw();
+        });
+        addButton("Add Left Arm", () => addLimb("leftArm"));
+        addButton("Add Right Arm", () => addLimb("rightArm"));
+        addButton("Add Left Leg", () => addLimb("leftLeg"));
+        addButton("Add Right Leg", () => addLimb("rightLeg"));
+        addButton("Show/Hide Hands", () => {
+            drawState.showHands = !drawState.showHands;
+            draw();
+        });
+        addButton("Show/Hide Face", () => {
+            drawState.showFace = !drawState.showFace;
+            draw();
+        });
+        addButton("Disable Hands", () => {
+            for (const points of [working.handLeft, working.handRight]) {
+                if (points) points.forEach(point => { point.c = 0; });
+            }
+            draw();
+        });
+        addButton("Disable Face", () => {
+            if (working.face) working.face.forEach(point => { point.c = 0; });
+            draw();
+        });
+
+        for (const [label, names] of Object.entries(limbGroups)) {
+            addButton(`Toggle ${label}`, () => {
+                const visible = names.some(name => jointVisible(name));
+                for (const name of names) {
+                    if (working.joints[name]) working.joints[name].c = visible ? 0 : Math.max(working.joints[name].c || 0, 0.95);
+                }
+                draw();
+            });
+        }
+
+        addButton("Cancel", () => overlay.remove(), "aps-btn danger");
+
+        body.appendChild(canvasWrap);
+        body.appendChild(controls);
+        modal.appendChild(title);
+        modal.appendChild(body);
+        overlay.appendChild(modal);
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        this.container.appendChild(overlay);
+
+        resizeCanvas();
+        draw();
+    }
+
+    showMultiAnglePoseInitializerPreview({ views, preserveCamera = true }) {
+        if (!Array.isArray(views) || !views.length) return;
+
+        const overlay = document.createElement("div");
+        overlay.className = "aps-modal-overlay";
+        overlay.style.zIndex = "1200";
+
+        const modal = document.createElement("div");
+        modal.className = "aps-modal";
+        modal.style.width = "min(1080px, 96%)";
+        modal.style.maxHeight = "92%";
+
+        const title = document.createElement("div");
+        title.className = "aps-modal-title";
+        title.textContent = "Multi-Angle Pose Initializer";
+
+        const body = document.createElement("div");
+        body.style.display = "grid";
+        body.style.gridTemplateColumns = "minmax(0, 1fr) 190px";
+        body.style.gap = "12px";
+        body.style.padding = "12px";
+        body.style.overflow = "auto";
+
+        const grid = document.createElement("div");
+        grid.style.display = "grid";
+        grid.style.gridTemplateColumns = "repeat(2, minmax(0, 1fr))";
+        grid.style.gap = "10px";
+
+        const controls = document.createElement("div");
+        controls.style.display = "flex";
+        controls.style.flexDirection = "column";
+        controls.style.gap = "8px";
+
+        let selectedIndex = 0;
+        const cards = [];
+        const skeletonEdges = [
+            ["neck", "nose"],
+            ["neck", "l_shoulder"], ["l_shoulder", "l_elbow"], ["l_elbow", "l_wrist"],
+            ["neck", "r_shoulder"], ["r_shoulder", "r_elbow"], ["r_elbow", "r_wrist"],
+            ["neck", "mid_hip"], ["mid_hip", "l_hip"], ["l_hip", "l_knee"], ["l_knee", "l_ankle"],
+            ["mid_hip", "r_hip"], ["r_hip", "r_knee"], ["r_knee", "r_ankle"]
+        ];
+
+        const drawPreview = (canvas, view) => {
+            const image = view.image;
+            const keypoints = view.keypoints;
+            const maxW = 430;
+            const scale = Math.min(maxW / image.naturalWidth, 320 / image.naturalHeight, 1);
+            canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+            canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+            if (!keypoints?.joints) return;
+            const cw = Math.max(1, Number(keypoints.canvasWidth || image.naturalWidth || 512));
+            const ch = Math.max(1, Number(keypoints.canvasHeight || image.naturalHeight || 512));
+            const visible = (name) => keypoints.joints[name] && Number(keypoints.joints[name].c || 0) > 0.05;
+            const pt = (name) => ({
+                x: (keypoints.joints[name].x / cw) * canvas.width,
+                y: (keypoints.joints[name].y / ch) * canvas.height
+            });
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.strokeStyle = "rgba(255, 170, 0, 0.9)";
+            ctx.lineWidth = 3;
+            for (const [a, b] of skeletonEdges) {
+                if (!visible(a) || !visible(b)) continue;
+                const pa = pt(a);
+                const pb = pt(b);
+                ctx.beginPath();
+                ctx.moveTo(pa.x, pa.y);
+                ctx.lineTo(pb.x, pb.y);
+                ctx.stroke();
+            }
+            for (const name of Object.keys(keypoints.joints)) {
+                if (!visible(name)) continue;
+                const p = pt(name);
+                ctx.fillStyle = "#ff8fa3";
+                ctx.strokeStyle = "rgba(0,0,0,0.75)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+            }
+        };
+
+        const refreshCards = () => {
+            cards.forEach((card, index) => {
+                card.style.borderColor = index === selectedIndex ? "var(--ps-accent)" : "var(--ps-border)";
+                card.style.boxShadow = index === selectedIndex ? "0 0 0 1px var(--ps-accent)" : "none";
+            });
+        };
+
+        views.forEach((view, index) => {
+            view.keypoints = this.cloneOpenPoseKeypoints(this.filterCroppedOpenPoseParts(view.keypoints));
+            const card = document.createElement("button");
+            card.className = "aps-btn";
+            card.style.padding = "6px";
+            card.style.display = "flex";
+            card.style.flexDirection = "column";
+            card.style.gap = "6px";
+            card.style.alignItems = "stretch";
+            card.style.background = "rgba(0,0,0,0.22)";
+            card.onclick = () => {
+                selectedIndex = index;
+                refreshCards();
+            };
+
+            const label = document.createElement("div");
+            label.textContent = view.label || `View ${index + 1}`;
+            label.style.textAlign = "left";
+            label.style.fontSize = "12px";
+            label.style.color = "var(--ps-text)";
+            const canvas = document.createElement("canvas");
+            canvas.style.width = "100%";
+            canvas.style.height = "auto";
+            canvas.style.borderRadius = "4px";
+            drawPreview(canvas, view);
+
+            card.appendChild(label);
+            card.appendChild(canvas);
+            cards.push(card);
+            grid.appendChild(card);
+        });
+
+        const addButton = (text, onClick, className = "aps-btn") => {
+            const btn = document.createElement("button");
+            btn.className = className;
+            btn.textContent = text;
+            btn.onclick = onClick;
+            controls.appendChild(btn);
+            return btn;
+        };
+
+        addButton("Edit Selected", () => {
+            const view = views[selectedIndex];
+            this.showPoseInitializerPreview({
+                image: view.image,
+                keypoints: view.keypoints,
+                depthSamples: view.depthSamples,
+                preserveCamera,
+                onApply: (edited, depthSamples) => {
+                    view.keypoints = edited;
+                    view.depthSamples = depthSamples;
+                    const canvas = cards[selectedIndex].querySelector("canvas");
+                    drawPreview(canvas, view);
+                    return true;
+                }
+            });
+        }, "aps-btn primary");
+
+        addButton("Apply Multi-Angle", () => {
+            const fused = this.fuseMultiAnglePoseViews(views);
+            const ok = this.applyParsedOpenPoseToSelectedCharacter(fused.keypoints, fused.depthSamples, {
+                preserveCamera,
+                successMessage: "Pose initialized from multi-angle skeletons."
+            });
+            if (ok) overlay.remove();
+        }, "aps-btn primary");
+
+        addButton("Apply Selected", () => {
+            const view = views[selectedIndex];
+            const ok = this.applyParsedOpenPoseToSelectedCharacter(view.keypoints, view.depthSamples, {
+                preserveCamera,
+                successMessage: "Pose initialized from selected angle."
+            });
+            if (ok) overlay.remove();
+        });
+
+        addButton("Cancel", () => overlay.remove(), "aps-btn danger");
+
+        body.appendChild(grid);
+        body.appendChild(controls);
+        modal.appendChild(title);
+        modal.appendChild(body);
+        overlay.appendChild(modal);
+        overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+        this.container.appendChild(overlay);
+        refreshCards();
+    }
+
+    fuseMultiAnglePoseViews(views) {
+        const usable = (views || []).filter(view => view?.keypoints?.joints);
+        const baseView = usable[0];
+        const base = this.cloneOpenPoseKeypoints(baseView.keypoints);
+        const jointNames = new Set();
+        usable.forEach(view => Object.keys(view.keypoints.joints || {}).forEach(name => jointNames.add(name)));
+
+        const baseW = Math.max(1, Number(base.canvasWidth || baseView.image?.naturalWidth || 512));
+        const baseH = Math.max(1, Number(base.canvasHeight || baseView.image?.naturalHeight || 512));
+        for (const name of jointNames) {
+            const baseJoint = base.joints[name];
+            if (baseJoint && Number(baseJoint.c || 0) > 0.1) continue;
+            const candidates = usable
+                .map(view => {
+                    const joint = view.keypoints.joints?.[name];
+                    if (!joint || Number(joint.c || 0) <= 0.1) return null;
+                    const w = Math.max(1, Number(view.keypoints.canvasWidth || view.image?.naturalWidth || 512));
+                    const h = Math.max(1, Number(view.keypoints.canvasHeight || view.image?.naturalHeight || 512));
+                    return {
+                        x: (joint.x / w) * baseW,
+                        y: (joint.y / h) * baseH,
+                        c: Number(joint.c || 0)
+                    };
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.c - a.c);
+            if (candidates[0]) base.joints[name] = candidates[0];
+        }
+
+        const depthSamples = {};
+        const depthNames = new Set();
+        usable.forEach(view => Object.keys(view.depthSamples || {}).forEach(name => depthNames.add(name)));
+        for (const name of depthNames) {
+            let total = 0;
+            let count = 0;
+            for (const view of usable) {
+                const value = view.depthSamples?.[name];
+                if (Number.isFinite(Number(value))) {
+                    total += Number(value);
+                    count += 1;
+                }
+            }
+            if (count) depthSamples[name] = total / count;
+        }
+
+        return { keypoints: base, depthSamples };
+    }
+
+    cloneOpenPoseKeypoints(parsed) {
+        return {
+            ...parsed,
+            joints: Object.fromEntries(Object.entries(parsed?.joints || {}).map(([name, joint]) => [name, { ...joint }])),
+            handLeft: parsed?.handLeft ? parsed.handLeft.map(p => ({ ...p })) : parsed?.handLeft,
+            handRight: parsed?.handRight ? parsed.handRight.map(p => ({ ...p })) : parsed?.handRight,
+            face: parsed?.face ? parsed.face.map(p => ({ ...p })) : parsed?.face
+        };
+    }
+
+    filterCroppedOpenPoseParts(parsed) {
+        if (!parsed?.joints) return parsed;
+
+        const clone = this.cloneOpenPoseKeypoints(parsed);
+
+        const joints = clone.joints;
+        const w = Math.max(1, Number(clone.canvasWidth || 512));
+        const h = Math.max(1, Number(clone.canvasHeight || 512));
+        const edgeX = Math.max(8, w * 0.025);
+        const edgeY = Math.max(8, h * 0.025);
+        const minConfidence = 0.18;
+
+        const isLowConfidence = (name) => !joints[name] || Number(joints[name].c || 0) < minConfidence;
+        const isNearEdge = (name) => {
+            const joint = joints[name];
+            if (!joint) return true;
+            return joint.x <= edgeX || joint.x >= w - edgeX || joint.y <= edgeY || joint.y >= h - edgeY;
+        };
+        const hide = (names) => {
+            for (const name of names) {
+                if (joints[name]) joints[name].c = 0;
+            }
+        };
+
+        const limbRules = [
+            { terminal: ["l_knee", "l_ankle"], hide: ["l_knee", "l_ankle"] },
+            { terminal: ["r_knee", "r_ankle"], hide: ["r_knee", "r_ankle"] },
+            { terminal: ["l_elbow", "l_wrist"], hide: ["l_elbow", "l_wrist"] },
+            { terminal: ["r_elbow", "r_wrist"], hide: ["r_elbow", "r_wrist"] },
+        ];
+
+        for (const rule of limbRules) {
+            const cropped = rule.terminal.some(name => isLowConfidence(name) || isNearEdge(name));
+            if (cropped) hide(rule.hide);
+        }
+
+        return clone;
+    }
+
+    async detectOpenPoseFromImageDataUrl(dataUrl) {
+        const res = await fetch("/advanced_pose_studio/openpose_from_image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ image: dataUrl, resolution: 512 })
+        });
+
+        let payload = null;
+        try {
+            payload = await res.json();
+        } catch (e) {
+            throw new Error(`OpenPose detector returned an invalid response (${res.status}).`);
+        }
+
+        if (!res.ok) {
+            throw new Error(payload?.error || `OpenPose detector failed (${res.status}).`);
+        }
+
+        const parsed = detectAndParseJSON(payload.openpose);
+        if (!parsed) {
+            throw new Error("OpenPose detector did not return usable keypoints.");
+        }
+
+        if (payload.depth_error) {
+            console.warn("[Advanced Pose Studio] Depth detector unavailable:", payload.depth_error);
+        }
+
+        return {
+            keypoints: parsed,
+            depthSamples: payload.depth_samples || null
+        };
+    }
+
     handleFileImport(e) {
         const file = e.target.files[0];
         if (!file) return;
@@ -2933,21 +4130,10 @@ class PoseStudioWidget {
             reader.onload = (event) => {
                 const img = new Image();
                 img.onload = () => {
-                    const keypoints = extractKeypointsFromImage(img);
-                    if (keypoints && this.viewer && this.viewer.isInitialized()) {
-                        const poseData = convertOpenPoseToPose(keypoints, this.viewer);
-                        if (poseData) {
-                            this.poses[this.activeTab] = poseData;
-                            this.viewer.setPose(poseData);
-                            this.updateRotationSliders();
-                            this.syncToNode(false);
-                            this.showMessage("OpenPose image imported successfully.");
-                        } else {
-                            this.showMessage("Failed to convert OpenPose keypoints to pose.", true);
-                        }
-                    } else {
-                        this.showMessage("Could not detect OpenPose keypoints in image.", true);
-                    }
+                    this.applyOpenPoseImageToSelectedCharacter({ image: img, dataUrl: event.target.result }, {
+                        preserveCamera: false,
+                        successMessage: "OpenPose image imported successfully."
+                    });
                 };
                 img.src = event.target.result;
                 e.target.value = '';
@@ -2966,7 +4152,8 @@ class PoseStudioWidget {
                 const openPoseKeypoints = detectAndParseJSON(data);
                 if (openPoseKeypoints) {
                     if (this.viewer && this.viewer.isInitialized()) {
-                        const poseData = convertOpenPoseToPose(openPoseKeypoints, this.viewer);
+                        const filteredOpenPoseKeypoints = this.filterCroppedOpenPoseParts(openPoseKeypoints);
+                        const poseData = convertOpenPoseToPose(filteredOpenPoseKeypoints, this.viewer);
                         if (poseData) {
                             this.poses[this.activeTab] = poseData;
                             this.viewer.setPose(poseData);
@@ -2976,7 +4163,7 @@ class PoseStudioWidget {
                             this.showMessage("OpenPose JSON imported successfully.");
 
                             // Debug: round-trip angle test
-                            roundTripTest(openPoseKeypoints, this.viewer, poseData);
+                            roundTripTest(filteredOpenPoseKeypoints, this.viewer, poseData);
                         } else {
                             this.showMessage("Failed to convert OpenPose data to pose.", true);
                         }
@@ -3036,11 +4223,8 @@ class PoseStudioWidget {
                 this.exportParams.background_url = dataUrl;
                 this.syncToNode(false);
 
-                // Force model update (preview button effect) to fix camera shift
-                this.loadModel(false);
-
                 if (this.refBtn) {
-                    this.refBtn.innerHTML = '<span class="vnccs-ps-btn-icon">🗑️</span> Remove Background';
+                    this.refBtn.innerHTML = '<span class="aps-btn-icon">🗑️</span> Remove Background';
                     this.refBtn.classList.add('danger');
                 }
             }
@@ -3053,27 +4237,27 @@ class PoseStudioWidget {
 
     showLibraryModal() {
         const overlay = document.createElement('div');
-        overlay.className = 'vnccs-ps-modal-overlay';
+        overlay.className = 'aps-modal-overlay';
 
         const modal = document.createElement('div');
-        modal.className = 'vnccs-ps-library-modal';
+        modal.className = 'aps-library-modal';
         modal.innerHTML = `
-            <div class="vnccs-ps-library-modal-header">
-                <div class="vnccs-ps-library-modal-title">📚 Pose Library</div>
-                <button class="vnccs-ps-modal-close">✕</button>
+            <div class="aps-library-modal-header">
+                <div class="aps-library-modal-title">📚 Pose Library</div>
+                <button class="aps-modal-close">✕</button>
             </div>
-            <div class="vnccs-ps-library-modal-grid"></div>
-            <div class="vnccs-ps-library-modal-footer">
-                 <button class="vnccs-ps-btn primary" style="width: auto; padding: 10px 20px;">
-                    <span class="vnccs-ps-btn-icon">💾</span> Save Current Pose
+            <div class="aps-library-modal-grid"></div>
+            <div class="aps-library-modal-footer">
+                 <button class="aps-btn primary" style="width: auto; padding: 10px 20px;">
+                    <span class="aps-btn-icon">💾</span> Save Current Pose
                 </button>
             </div>
         `;
 
-        this.libraryGrid = modal.querySelector('.vnccs-ps-library-modal-grid');
+        this.libraryGrid = modal.querySelector('.aps-library-modal-grid');
 
-        modal.querySelector('.vnccs-ps-modal-close').onclick = () => overlay.remove();
-        modal.querySelector('.vnccs-ps-library-modal-footer button').onclick = () => this.showSaveToLibraryModal();
+        modal.querySelector('.aps-modal-close').onclick = () => overlay.remove();
+        modal.querySelector('.aps-library-modal-footer button').onclick = () => this.showSaveToLibraryModal();
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
         overlay.appendChild(modal);
@@ -3084,47 +4268,47 @@ class PoseStudioWidget {
 
     async refreshLibrary(forceFull = false) {
         try {
-            const res = await fetch('/vnccs/pose_library/list' + (forceFull ? '?full=true' : ''));
+            const res = await fetch('/advanced_pose_studio/pose_library/list' + (forceFull ? '?full=true' : ''));
             const data = await res.json();
             this.libraryPoses = data.poses || []; // Cache for random selection
 
             if (!this.libraryGrid) {
-                this.libraryGrid = document.querySelector('.vnccs-ps-library-modal-grid');
+                this.libraryGrid = document.querySelector('.aps-library-modal-grid');
             }
             if (!this.libraryGrid) return; // Still not found (modal closed)
 
             this.libraryGrid.innerHTML = '';
 
             if (!data.poses || data.poses.length === 0) {
-                this.libraryGrid.innerHTML = '<div class="vnccs-ps-library-empty">No saved poses.<br>Click "Save Current" to add one.</div>';
+                this.libraryGrid.innerHTML = '<div class="aps-library-empty">No saved poses.<br>Click "Save Current" to add one.</div>';
                 return;
             }
 
             for (const pose of data.poses) {
                 const item = document.createElement('div');
-                item.className = 'vnccs-ps-library-item';
+                item.className = 'aps-library-item';
 
                 const preview = document.createElement('div');
-                preview.className = 'vnccs-ps-library-item-preview';
+                preview.className = 'aps-library-item-preview';
                 if (pose.has_preview) {
-                    preview.innerHTML = `<img src="/vnccs/pose_library/preview/${encodeURIComponent(pose.name)}" alt="${pose.name}">`;
+                    preview.innerHTML = `<img src="/advanced_pose_studio/pose_library/preview/${encodeURIComponent(pose.name)}" alt="${pose.name}">`;
                 } else {
                     preview.innerHTML = '🦴';
                 }
 
                 const name = document.createElement('div');
-                name.className = 'vnccs-ps-library-item-name';
+                name.className = 'aps-library-item-name';
                 name.innerText = pose.name;
 
                 item.onclick = () => {
                     this.loadFromLibrary(pose.name);
-                    const overlay = item.closest('.vnccs-ps-modal-overlay');
+                    const overlay = item.closest('.aps-modal-overlay');
                     if (overlay) overlay.remove();
                 };
 
                 // Delete button
                 const delBtn = document.createElement('div');
-                delBtn.className = 'vnccs-ps-library-item-delete';
+                delBtn.className = 'aps-library-item-delete';
                 delBtn.innerHTML = '✕';
                 delBtn.onclick = (e) => {
                     e.stopPropagation(); // Prevent loading pose
@@ -3140,44 +4324,44 @@ class PoseStudioWidget {
         } catch (err) {
             console.error("Failed to load library:", err);
             if (this.libraryGrid) {
-                this.libraryGrid.innerHTML = '<div class="vnccs-ps-library-empty">Failed to load library.</div>';
+                this.libraryGrid.innerHTML = '<div class="aps-library-empty">Failed to load library.</div>';
             }
         }
     }
 
     showSaveToLibraryModal() {
         const overlay = document.createElement('div');
-        overlay.className = 'vnccs-ps-modal-overlay';
+        overlay.className = 'aps-modal-overlay';
 
         const modal = document.createElement('div');
-        modal.className = 'vnccs-ps-modal';
+        modal.className = 'aps-modal';
         modal.innerHTML = `
-            <div class="vnccs-ps-modal-title">Save to Library</div>
-            <div class="vnccs-ps-modal-content">
-                <input type="text" placeholder="Pose name..." class="vnccs-ps-input" style="width:100%;padding:8px;">
+            <div class="aps-modal-title">Save to Library</div>
+            <div class="aps-modal-content">
+                <input type="text" placeholder="Pose name..." class="aps-input" style="width:100%;padding:8px;">
                 <label style="display:flex;align-items:center;gap:8px;color:var(--ps-text-muted);font-size:11px;">
                     <input type="checkbox" checked> Include preview image
                 </label>
             </div>
-            <button class="vnccs-ps-modal-btn primary" style="justify-content:center;">💾 Save</button>
-            <button class="vnccs-ps-modal-btn cancel">Cancel</button>
+            <button class="aps-modal-btn primary" style="justify-content:center;">💾 Save</button>
+            <button class="aps-modal-btn cancel">Cancel</button>
         `;
 
         const nameInput = modal.querySelector('input[type="text"]');
         const previewCheck = modal.querySelector('input[type="checkbox"]');
 
-        modal.querySelector('.vnccs-ps-modal-btn.primary').onclick = () => {
+        modal.querySelector('.aps-modal-btn.primary').onclick = () => {
             const name = nameInput.value.trim();
             if (name) {
                 this.saveToLibrary(name, previewCheck.checked);
                 overlay.remove();
                 // Refresh modal if open
-                const libraryGrid = document.querySelector('.vnccs-ps-library-modal-grid');
+                const libraryGrid = document.querySelector('.aps-library-modal-grid');
                 if (libraryGrid) this.refreshLibrary(false);
             }
         };
 
-        modal.querySelector('.vnccs-ps-modal-btn.cancel').onclick = () => overlay.remove();
+        modal.querySelector('.aps-modal-btn.cancel').onclick = () => overlay.remove();
         overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
         overlay.appendChild(modal);
@@ -3198,12 +4382,13 @@ class PoseStudioWidget {
                 this.exportParams.cam_zoom || 1.0,
                 this.exportParams.bg_color || [40, 40, 40],
                 this.exportParams.cam_offset_x || 0,
-                this.exportParams.cam_offset_y || 0
+                this.exportParams.cam_offset_y || 0,
+                { useViewportCamera: true }
             );
         }
 
         try {
-            await fetch('/vnccs/pose_library/save', {
+            await fetch('/advanced_pose_studio/pose_library/save', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, pose, preview })
@@ -3215,9 +4400,9 @@ class PoseStudioWidget {
     }
 
     async loadFromLibrary(name) {
-        console.log("[VNCCS PoseStudio] loadFromLibrary triggered for:", name);
+        console.log("[Advanced Pose Studio] loadFromLibrary triggered for:", name);
         try {
-            const res = await fetch(`/vnccs/pose_library/get/${encodeURIComponent(name)}`);
+            const res = await fetch(`/advanced_pose_studio/pose_library/get/${encodeURIComponent(name)}`);
             const data = await res.json();
 
             if (data.pose && this.viewer) {
@@ -3239,30 +4424,30 @@ class PoseStudioWidget {
 
     showSettingsModal() {
         // Toggle behavior: check if already exists
-        const existing = this.canvasContainer.querySelector('.vnccs-ps-settings-panel');
+        const existing = this.canvasContainer.querySelector('.aps-settings-panel');
         if (existing) {
             existing.remove();
             return;
         }
 
         const panel = document.createElement('div');
-        panel.className = 'vnccs-ps-settings-panel';
+        panel.className = 'aps-settings-panel';
 
         // Header
         const header = document.createElement('div');
-        header.className = 'vnccs-ps-settings-header';
+        header.className = 'aps-settings-header';
         header.innerHTML = `
-            <span class="vnccs-ps-settings-title">⚙️ Settings</span>
-            <button class="vnccs-ps-settings-close" title="Close">✕</button>
+            <span class="aps-settings-title">⚙️ Settings</span>
+            <button class="aps-settings-close" title="Close">✕</button>
         `;
-        header.querySelector('.vnccs-ps-settings-close').onclick = () => panel.remove();
+        header.querySelector('.aps-settings-close').onclick = () => panel.remove();
 
         const content = document.createElement('div');
-        content.className = 'vnccs-ps-settings-content';
+        content.className = 'aps-settings-content';
 
         // Debug Toggle
         const debugRow = document.createElement("div");
-        debugRow.className = "vnccs-ps-field";
+        debugRow.className = "aps-field";
 
         const debugLabel = document.createElement("label");
         debugLabel.style.display = "flex";
@@ -3295,7 +4480,7 @@ class PoseStudioWidget {
 
         // Portrait Mode Toggle
         const portraitRow = document.createElement("div");
-        portraitRow.className = "vnccs-ps-field";
+        portraitRow.className = "aps-field";
         portraitRow.style.marginTop = "10px";
 
         const portraitLabel = document.createElement("label");
@@ -3322,7 +4507,7 @@ class PoseStudioWidget {
 
         // Keep Lighting Toggle
         const keepLightRow = document.createElement("div");
-        keepLightRow.className = "vnccs-ps-field";
+        keepLightRow.className = "aps-field";
         keepLightRow.style.marginTop = "10px";
 
         const keepLightLabel = document.createElement("label");
@@ -3349,7 +4534,7 @@ class PoseStudioWidget {
 
         // Skin Texture Section
         const skinHeader = document.createElement("div");
-        skinHeader.className = "vnccs-ps-settings-title";
+        skinHeader.className = "aps-settings-title";
         skinHeader.style.marginTop = "20px";
         skinHeader.style.padding = "10px 0";
         skinHeader.style.borderTop = "1px solid var(--ps-border)";
@@ -3357,11 +4542,11 @@ class PoseStudioWidget {
         content.appendChild(skinHeader);
 
         const skinRow = document.createElement("div");
-        skinRow.className = "vnccs-ps-field";
+        skinRow.className = "aps-field";
         skinRow.style.marginTop = "5px";
 
         const skinToggle = document.createElement("div");
-        skinToggle.className = "vnccs-ps-toggle";
+        skinToggle.className = "aps-toggle";
         skinToggle.style.width = "100%";
 
         const skinOptions = [
@@ -3380,7 +4565,7 @@ class PoseStudioWidget {
 
         for (const opt of skinOptions) {
             const btn = document.createElement("button");
-            btn.className = "vnccs-ps-toggle-btn";
+            btn.className = "aps-toggle-btn";
             btn.innerText = opt.label;
             btn.style.flex = "1";
             btn.onclick = () => {
@@ -3401,7 +4586,7 @@ class PoseStudioWidget {
 
         // Prompt Templates Section
         const templateHeader = document.createElement("div");
-        templateHeader.className = "vnccs-ps-settings-title";
+        templateHeader.className = "aps-settings-title";
         templateHeader.style.marginTop = "20px";
         templateHeader.style.padding = "10px 0";
         templateHeader.style.borderTop = "1px solid var(--ps-border)";
@@ -3410,12 +4595,12 @@ class PoseStudioWidget {
 
         const createTemplateField = (label, key) => {
             const field = document.createElement("div");
-            field.className = "vnccs-ps-field";
+            field.className = "aps-field";
             field.style.flexDirection = "column";
             field.style.alignItems = "stretch";
 
             const l = document.createElement("div");
-            l.className = "vnccs-ps-label";
+            l.className = "aps-label";
             l.innerText = label;
             l.style.marginBottom = "5px";
 
@@ -3469,23 +4654,23 @@ class PoseStudioWidget {
 
     showMessage(text, isError = false) {
         const overlay = document.createElement('div');
-        overlay.className = 'vnccs-ps-modal-overlay';
+        overlay.className = 'aps-modal-overlay';
 
         const modal = document.createElement('div');
-        modal.className = 'vnccs-ps-modal';
+        modal.className = 'aps-modal';
         modal.style.maxWidth = "300px";
 
         const title = document.createElement('div');
-        title.className = 'vnccs-ps-modal-title';
+        title.className = 'aps-modal-title';
         title.textContent = isError ? '⚠️ Error' : 'ℹ️ Information';
 
         const content = document.createElement('div');
-        content.className = 'vnccs-ps-modal-content';
+        content.className = 'aps-modal-content';
         content.style.textAlign = 'center';
         content.textContent = text;
 
         const okBtn = document.createElement('button');
-        okBtn.className = 'vnccs-ps-modal-btn';
+        okBtn.className = 'aps-modal-btn';
         okBtn.style.justifyContent = 'center';
         okBtn.textContent = 'OK';
         okBtn.onclick = () => overlay.remove();
@@ -3500,17 +4685,17 @@ class PoseStudioWidget {
 
     showDeleteConfirmModal(poseName) {
         const overlay = document.createElement('div');
-        overlay.className = 'vnccs-ps-modal-overlay';
+        overlay.className = 'aps-modal-overlay';
 
         const modal = document.createElement('div');
-        modal.className = 'vnccs-ps-modal';
+        modal.className = 'aps-modal';
 
         const title = document.createElement('div');
-        title.className = 'vnccs-ps-modal-title';
+        title.className = 'aps-modal-title';
         title.textContent = '⚠️ Delete Pose';
 
         const content = document.createElement('div');
-        content.className = 'vnccs-ps-modal-content';
+        content.className = 'aps-modal-content';
         content.style.textAlign = 'center';
 
         const message = document.createElement('div');
@@ -3518,12 +4703,12 @@ class PoseStudioWidget {
         content.appendChild(message);
 
         const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'vnccs-ps-modal-btn danger';
+        deleteBtn.className = 'aps-modal-btn danger';
         deleteBtn.style.justifyContent = 'center';
         deleteBtn.textContent = '🗑️ Delete';
 
         const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'vnccs-ps-modal-btn cancel';
+        cancelBtn.className = 'aps-modal-btn cancel';
         cancelBtn.textContent = 'Cancel';
 
         modal.appendChild(title);
@@ -3545,28 +4730,310 @@ class PoseStudioWidget {
 
     async deleteFromLibrary(name) {
         try {
-            await fetch(`/vnccs/pose_library/delete/${encodeURIComponent(name)}`, { method: 'DELETE' });
+            await fetch(`/advanced_pose_studio/pose_library/delete/${encodeURIComponent(name)}`, { method: 'DELETE' });
             this.refreshLibrary(false);
         } catch (err) {
             console.error("Failed to delete pose:", err);
         }
     }
 
+    refreshCharacterList() {
+        if (!this.characterListEl || !this.viewer || !this.viewer.getCharacterSummary) return;
+        const chars = this.viewer.getCharacterSummary();
+        this.characterListEl.innerHTML = "";
+
+        chars.forEach((character) => {
+            const item = document.createElement("button");
+            item.className = "aps-btn";
+            item.textContent = "";
+            item.style.justifyContent = "flex-start";
+            item.style.alignItems = "center";
+            item.style.gap = "6px";
+            item.style.borderColor = character.active ? "var(--ps-accent)" : "var(--ps-border)";
+            item.style.color = character.active ? "var(--ps-accent)" : "var(--ps-text)";
+
+            if (character.image) {
+                const thumb = document.createElement("img");
+                thumb.src = character.image;
+                thumb.style.width = "24px";
+                thumb.style.height = "24px";
+                thumb.style.borderRadius = "4px";
+                thumb.style.objectFit = "cover";
+                thumb.style.flexShrink = "0";
+                item.appendChild(thumb);
+            }
+
+            const label = document.createElement("span");
+            label.textContent = character.label;
+            label.style.overflow = "hidden";
+            label.style.textOverflow = "ellipsis";
+            label.style.whiteSpace = "nowrap";
+            item.appendChild(label);
+
+            item.onclick = () => {
+                this.viewer.selectCharacter(character.id);
+                if (this.characterMoveMode) this.viewer.setCharacterTransformMode(true, this.characterGizmoMode || "translate");
+                this.refreshCharacterList();
+                this.syncToNode(false);
+            };
+            this.characterListEl.appendChild(item);
+        });
+    }
+
+    setCharacterMoveMode(enabled) {
+        this.characterMoveMode = enabled;
+        if (this.viewer && this.viewer.setCharacterTransformMode) {
+            this.viewer.setCharacterTransformMode(enabled, this.characterGizmoMode || "translate");
+        }
+        if (this.characterMoveBtn && this.characterPoseBtn) {
+            this.characterMoveBtn.style.borderColor = enabled ? "var(--ps-accent)" : "var(--ps-border)";
+            this.characterMoveBtn.style.color = enabled ? "var(--ps-accent)" : "var(--ps-text)";
+            this.characterPoseBtn.style.borderColor = !enabled ? "var(--ps-accent)" : "var(--ps-border)";
+            this.characterPoseBtn.style.color = !enabled ? "var(--ps-accent)" : "var(--ps-text)";
+        }
+        this.updateGizmoModeButtons();
+    }
+
+    setPointGizmoMode(mode) {
+        if (this.characterMoveMode) {
+            this.characterGizmoMode = mode === "rotate" ? "rotate" : "translate";
+            if (this.viewer && this.viewer.setCharacterTransformGizmoMode) {
+                this.viewer.setCharacterTransformGizmoMode(this.characterGizmoMode);
+            }
+            this.updateGizmoModeButtons();
+            return;
+        }
+
+        this.pointGizmoMode = mode === "move" ? "move" : "rotate";
+        if (this.viewer && this.viewer.setPointTransformMode) {
+            this.viewer.setPointTransformMode(this.pointGizmoMode);
+        }
+        this.updateGizmoModeButtons();
+    }
+
+    updateGizmoModeButtons() {
+        if (this.rotatePointBtn && this.movePointBtn) {
+            if (this.characterMoveMode) {
+                const rotate = (this.characterGizmoMode || "translate") === "rotate";
+                this.rotatePointBtn.textContent = "Rotate Character";
+                this.movePointBtn.textContent = "Move Character";
+                this.rotatePointBtn.style.borderColor = rotate ? "var(--ps-accent)" : "var(--ps-border)";
+                this.rotatePointBtn.style.color = rotate ? "var(--ps-accent)" : "var(--ps-text)";
+                this.movePointBtn.style.borderColor = !rotate ? "var(--ps-accent)" : "var(--ps-border)";
+                this.movePointBtn.style.color = !rotate ? "var(--ps-accent)" : "var(--ps-text)";
+            } else {
+                const move = this.pointGizmoMode === "move";
+                this.rotatePointBtn.textContent = "Rotate Points";
+                this.movePointBtn.textContent = "Move Points";
+                this.rotatePointBtn.style.borderColor = !move ? "var(--ps-accent)" : "var(--ps-border)";
+                this.rotatePointBtn.style.color = !move ? "var(--ps-accent)" : "var(--ps-text)";
+                this.movePointBtn.style.borderColor = move ? "var(--ps-accent)" : "var(--ps-border)";
+                this.movePointBtn.style.color = move ? "var(--ps-accent)" : "var(--ps-text)";
+            }
+        }
+    }
+
+    addSceneCharacter() {
+        if (!this.viewer || !this.viewer.addCharacterData) return;
+        this.setBusyState(true, "Adding Character...");
+
+        api.fetchApi("/advanced_pose_studio/character/update_preview", {
+            method: "POST",
+            body: JSON.stringify(this.meshParams)
+        }).then(r => r.json()).then(d => {
+            const id = this.viewer.addCharacterData(d, { meshParams: this.meshParams });
+            if (!id) {
+                this.showMessage("The scene already contains 4 characters.", true);
+                return;
+            }
+            this.refreshCharacterList();
+            this.syncToNode(false);
+        }).catch((err) => {
+            console.error("Failed to add character:", err);
+            this.showMessage("Failed to add character mesh.", true);
+        }).finally(() => {
+            this.setBusyState(false);
+        });
+    }
+
+    deleteSceneCharacter() {
+        if (!this.viewer || !this.viewer.deleteActiveCharacter) return;
+        this.viewer.deleteActiveCharacter();
+        this.refreshCharacterList();
+        this.syncToNode(false);
+    }
+
+    async loadCharactersFromJsonInput() {
+        if (!this.viewer || !this.viewer.addCharacterData) return;
+
+        let roster = null;
+        try {
+            const res = await fetch(`/advanced_pose_studio/character_roster/${this.node.id}`);
+            const cached = await res.json();
+            if (cached?.characters?.length) roster = cached;
+        } catch (e) {
+            console.warn("[Advanced Pose Studio] Failed to fetch character roster:", e);
+        }
+
+        const characters = (roster?.characters || []).slice(0, 4);
+        if (!characters.length) {
+            this.showMessage("No character JSON data found. Connect characters_json, run the node once, then click Load JSON Characters.", true);
+            return;
+        }
+
+        this.setBusyState(true, "Loading Characters...");
+        try {
+            for (let i = 0; i < characters.length; i++) {
+                const character = characters[i];
+                const mesh = character.mesh || this.inferMeshParamsFromCharacter(character);
+                const res = await api.fetchApi("/advanced_pose_studio/character/update_preview", {
+                    method: "POST",
+                    body: JSON.stringify(mesh)
+                });
+                const data = await res.json();
+                const metadata = {
+                    name: character.name || character.NAME || "Character",
+                    image: character.image || null,
+                    meshParams: mesh
+                };
+                if (i === 0) {
+                    this.viewer.loadData(data, true, metadata);
+                } else {
+                    this.viewer.addCharacterData(data, metadata);
+                }
+            }
+            this.refreshCharacterList();
+            this.syncToNode(false);
+        } finally {
+            this.setBusyState(false);
+        }
+    }
+
+    async restoreSceneCharacters(sceneState) {
+        if (!sceneState?.characters?.length || !this.viewer) return false;
+        if (this.viewerReadyPromise) await this.viewerReadyPromise;
+        const characters = sceneState.characters.slice(0, 4);
+        this.setBusyState(true, "Restoring Characters...");
+        this._restoringSceneCharacters = true;
+        try {
+            const idMap = {};
+            const restored = [];
+            for (let i = 0; i < characters.length; i++) {
+                const character = characters[i];
+                const mesh = character.meshParams || this.meshParams;
+                const res = await api.fetchApi("/advanced_pose_studio/character/update_preview", {
+                    method: "POST",
+                    body: JSON.stringify(mesh)
+                });
+                const data = await res.json();
+                const metadata = {
+                    name: character.name || `Character ${i + 1}`,
+                    image: character.image || null,
+                    meshParams: mesh
+                };
+
+                if (i === 0) {
+                    this.viewer.loadData(data, true, metadata);
+                } else {
+                    this.viewer.addCharacterData(data, metadata);
+                }
+
+                const summary = this.viewer.getCharacterSummary?.() || [];
+                const loaded = summary[summary.length - 1];
+                if (loaded) {
+                    if (character.id) idMap[character.id] = loaded.id;
+                    restored.push({ saved: character, loadedId: loaded.id });
+                }
+            }
+
+            for (const item of restored) {
+                this.viewer.selectCharacter(item.loadedId);
+                const active = this.viewer.sceneCharacters?.find(c => c.id === item.loadedId);
+                const character = item.saved;
+                if (character.pose) {
+                    this.viewer.setPose({ ...character.pose, modelRotation: [0, 0, 0] }, true);
+                }
+                if (active?.skinnedMesh) {
+                    if (Array.isArray(character.position)) active.skinnedMesh.position.fromArray(character.position);
+                    if (Array.isArray(character.rotation)) active.skinnedMesh.rotation.fromArray(character.rotation);
+                    if (Array.isArray(character.scale)) active.skinnedMesh.scale.fromArray(character.scale);
+                    active.skinnedMesh.updateMatrixWorld(true);
+                }
+                this.viewer._rememberActiveCharacter?.();
+            }
+
+            const activeId = idMap[sceneState.activeCharacterId] || sceneState.activeCharacterId;
+            if (activeId && this.viewer.selectCharacter) {
+                this.viewer.selectCharacter(activeId);
+            }
+            this.refreshCharacterList();
+            return true;
+        } catch (e) {
+            console.error("[Advanced Pose Studio] Failed to restore scene characters:", e);
+            return false;
+        } finally {
+            this._restoringSceneCharacters = false;
+            this.setBusyState(false);
+        }
+    }
+
+    prepareCharacterRoster(raw) {
+        if (!raw || typeof raw !== "object") return null;
+        const count = Number(raw.selected_count || raw.characters?.length || 0);
+        const characters = (raw.characters || []).slice(0, Math.max(0, count)).map(c => ({
+            ...c,
+            name: c.NAME || c.name || "Character",
+            mesh: this.inferMeshParamsFromCharacter(c)
+        }));
+        return { characters };
+    }
+
+    inferMeshParamsFromCharacter(character) {
+        const text = ["NAME", "PERSONALITY", "BACKSTORY", "VISUAL", "ATTIRE"]
+            .map(k => character?.[k] || "")
+            .join(" ")
+            .toLowerCase();
+        let gender = 0.5;
+        if (/\b(she|her|hers|female|woman|girl)\b/.test(text)) gender = 0.0;
+        if (/\b(he|him|his|male|man|boy)\b/.test(text)) gender = 1.0;
+
+        let age = 25;
+        const ageMatch = text.match(/\b(\d{1,2})\s*(years? old|yo|y\/o)\b/);
+        if (ageMatch) age = Math.max(1, Math.min(90, Number(ageMatch[1])));
+
+        return {
+            age,
+            gender,
+            weight: 0.5,
+            muscle: 0.5,
+            height: 0.5,
+            breast_size: 0.5,
+            firmness: 0.5,
+            penis_len: 0.5,
+            penis_circ: 0.5,
+            penis_test: 0.5
+        };
+    }
+
     loadModel(showOverlay = true) {
-        if (showOverlay && this.loadingOverlay) this.loadingOverlay.style.display = "flex";
+        if (showOverlay) this.setBusyState(true, "Loading Model...");
 
         // Sync skin type to viewer before loading
         if (this.viewer) {
             this.viewer.setSkinMode(this.exportParams.skin_type || "naked");
         }
 
-        return api.fetchApi("/vnccs/character_studio/update_preview", {
+        return api.fetchApi("/advanced_pose_studio/character/update_preview", {
             method: "POST",
             body: JSON.stringify(this.meshParams)
         }).then(r => r.json()).then(d => {
             if (this.viewer) {
                 // Keep camera during updates
-                this.viewer.loadData(d, true);
+                if (this.viewer.replaceActiveCharacterData && this.viewer.getCharacterSummary().length > 1) {
+                    this.viewer.replaceActiveCharacterData(d, { meshParams: this.meshParams });
+                } else {
+                    this.viewer.loadData(d, true, { meshParams: this.meshParams });
+                }
 
                 // Apply lighting configuration
                 this.viewer.updateLights(this.lightParams);
@@ -3594,12 +5061,13 @@ class PoseStudioWidget {
                 if (this.viewer.isInitialized()) {
                     this.viewer.setPose(this.poses[this.activeTab] || {});
                     this.updateRotationSliders();
+                    this.refreshCharacterList();
                     // Full recapture needed because mesh changed
                     this.syncToNode(true);
                 }
             }
         }).finally(() => {
-            if (this.loadingOverlay) this.loadingOverlay.style.display = "none";
+            this.setBusyState(false);
         });
     }
 
@@ -3627,24 +5095,24 @@ class PoseStudioWidget {
 
         this.lightParams.forEach((light, index) => {
             const item = document.createElement('div');
-            item.className = 'vnccs-ps-light-card';
+            item.className = 'aps-light-card';
 
             // --- Header ---
             const header = document.createElement('div');
-            header.className = 'vnccs-ps-light-header';
+            header.className = 'aps-light-header';
 
             const title = document.createElement('span');
-            title.className = 'vnccs-ps-light-title';
+            title.className = 'aps-light-title';
 
             // Icon
             let iconChar = '💡';
             if (light.type === 'directional') iconChar = '☀️';
             else if (light.type === 'ambient') iconChar = '☁️';
 
-            title.innerHTML = `<span class="vnccs-ps-light-icon">${iconChar}</span> Light ${index + 1}`;
+            title.innerHTML = `<span class="aps-light-icon">${iconChar}</span> Light ${index + 1}`;
 
             const removeBtn = document.createElement('button');
-            removeBtn.className = 'vnccs-ps-light-remove';
+            removeBtn.className = 'aps-light-remove';
             removeBtn.innerHTML = '×';
             removeBtn.title = "Remove Light";
             removeBtn.onclick = (e) => {
@@ -3660,15 +5128,15 @@ class PoseStudioWidget {
 
             // --- Body ---
             const body = document.createElement('div');
-            body.className = 'vnccs-ps-light-body';
+            body.className = 'aps-light-body';
 
             // Grid 1: Type & Color
             const grid1 = document.createElement('div');
-            grid1.className = 'vnccs-ps-light-grid';
+            grid1.className = 'aps-light-grid';
 
             // Type
             const typeSelect = document.createElement('select');
-            typeSelect.className = 'vnccs-ps-light-select';
+            typeSelect.className = 'aps-light-select';
             ['ambient', 'directional', 'point'].forEach(t => {
                 const opt = document.createElement('option');
                 opt.value = t;
@@ -3686,7 +5154,7 @@ class PoseStudioWidget {
             // Color
             const colorInput = document.createElement('input');
             colorInput.type = 'color';
-            colorInput.className = 'vnccs-ps-light-color';
+            colorInput.className = 'aps-light-color';
             colorInput.value = light.color || '#ffffff';
             colorInput.oninput = (e) => {
                 light.color = colorInput.value;
@@ -3698,23 +5166,23 @@ class PoseStudioWidget {
 
             // Intensity
             const intensityRow = document.createElement('div');
-            intensityRow.className = 'vnccs-ps-light-slider-row';
+            intensityRow.className = 'aps-light-slider-row';
 
             const intLabel = document.createElement('span');
-            intLabel.className = 'vnccs-ps-light-pos-label';
+            intLabel.className = 'aps-light-pos-label';
             intLabel.innerText = "Int";
 
             const isAmbient = light.type === 'ambient';
             const intSlider = document.createElement('input');
             intSlider.type = 'range';
-            intSlider.className = 'vnccs-ps-light-slider';
+            intSlider.className = 'aps-light-slider';
             intSlider.min = 0;
             intSlider.max = isAmbient ? 2 : 5;
             intSlider.step = isAmbient ? 0.01 : 0.1;
             intSlider.value = light.intensity ?? (isAmbient ? 0.5 : 1);
 
             const intValue = document.createElement('span');
-            intValue.className = 'vnccs-ps-light-value';
+            intValue.className = 'aps-light-value';
             intValue.innerText = parseFloat(intSlider.value).toFixed(2);
 
             intSlider.oninput = () => {
@@ -3731,20 +5199,20 @@ class PoseStudioWidget {
             // Radius Slider (Point Light Only)
             if (light.type === 'point') {
                 const radiusRow = document.createElement('div');
-                radiusRow.className = 'vnccs-ps-light-slider-row';
+                radiusRow.className = 'aps-light-slider-row';
 
                 const radLabel = document.createElement('span');
-                radLabel.className = 'vnccs-ps-light-pos-label';
+                radLabel.className = 'aps-light-pos-label';
                 radLabel.innerText = "Rad";
 
                 const radSlider = document.createElement('input');
                 radSlider.type = 'range';
-                radSlider.className = 'vnccs-ps-light-slider';
+                radSlider.className = 'aps-light-slider';
                 radSlider.min = 5; radSlider.max = 300; radSlider.step = 1;
                 radSlider.value = light.radius ?? 100;
 
                 const radValue = document.createElement('span');
-                radValue.className = 'vnccs-ps-light-value';
+                radValue.className = 'aps-light-value';
                 radValue.innerText = radSlider.value;
 
                 radSlider.oninput = () => {
@@ -3762,10 +5230,10 @@ class PoseStudioWidget {
             // Position Controls (if not Ambient)
             if (light.type !== 'ambient') {
                 const radarWrap = document.createElement('div');
-                radarWrap.className = 'vnccs-ps-light-radar-wrap';
+                radarWrap.className = 'aps-light-radar-wrap';
 
                 const radarMain = document.createElement('div');
-                radarMain.className = 'vnccs-ps-light-radar-main';
+                radarMain.className = 'aps-light-radar-main';
 
                 // Radar (X and Z - Top Down)
                 const radar = this.createLightRadar(light);
@@ -3773,19 +5241,19 @@ class PoseStudioWidget {
 
                 // Height Slider (Y) - Vertical
                 const hVertWrap = document.createElement('div');
-                hVertWrap.className = 'vnccs-ps-light-slider-vert-wrap';
+                hVertWrap.className = 'aps-light-slider-vert-wrap';
 
                 const hLabel = document.createElement('span');
-                hLabel.className = 'vnccs-ps-light-h-label';
+                hLabel.className = 'aps-light-h-label';
                 hLabel.innerText = "Y-HGT";
 
                 const hVal = document.createElement('span');
-                hVal.className = 'vnccs-ps-light-h-val';
+                hVal.className = 'aps-light-h-val';
                 hVal.innerText = light.y || 0;
 
                 const hSlider = document.createElement('input');
                 hSlider.type = 'range';
-                hSlider.className = 'vnccs-ps-light-slider-vert';
+                hSlider.className = 'aps-light-slider-vert';
                 hSlider.setAttribute('orient', 'vertical'); // Firefox support
                 const isPoint = light.type === 'point';
                 hSlider.min = isPoint ? -10 : -100;
@@ -3814,7 +5282,7 @@ class PoseStudioWidget {
 
         // Add Light Button (Big)
         const addBtn = document.createElement('button');
-        addBtn.className = 'vnccs-ps-btn-add-large';
+        addBtn.className = 'aps-btn-add-large';
         addBtn.innerHTML = '+ Add Light Source';
         addBtn.disabled = isOverridden;
         if (isOverridden) {
@@ -4280,6 +5748,21 @@ class PoseStudioWidget {
         };
     }
 
+    captureSceneLayers(width, height, bgColor) {
+        if (!this.viewer || !this.viewer.isInitialized()) return;
+
+        this.backgroundOnlyCapture = this.viewer.capture(width, height, 1.0, bgColor, 0, 0, {
+            useViewportCamera: true,
+            backgroundOnly: true
+        });
+
+        this.characterLayerCaptures = [0, 1, 2, 3].map(index => this.viewer.capture(width, height, 1.0, bgColor, 0, 0, {
+            useViewportCamera: true,
+            characterIndex: index,
+            transparent: true
+        }));
+    }
+
     syncToNode(fullCapture = false) {
         if (this._isSyncing) return;
         this._isSyncing = true;
@@ -4356,7 +5839,7 @@ class PoseStudioWidget {
                         }
 
                         // Capture
-                        this.poseCaptures[i] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY);
+                        this.poseCaptures[i] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY, { useViewportCamera: true });
 
                         // Prompt
                         const promptLights = isOriginalLighting ? [{ type: 'ambient', color: '#ffffff', intensity: 1.0 }] : (debugParams.lights || originalLights);
@@ -4376,7 +5859,7 @@ class PoseStudioWidget {
                             this.viewer.updateLights(this.lightParams);
                         }
 
-                        this.poseCaptures[i] = this.viewer.capture(w, h, z, bg, oX, oY);
+                        this.poseCaptures[i] = this.viewer.capture(w, h, z, bg, oX, oY, { useViewportCamera: true });
                         this.lightingPrompts[i] = this.generatePromptFromLights(isOriginalLighting ? [] : this.lightParams);
                     }
                 }
@@ -4407,7 +5890,7 @@ class PoseStudioWidget {
                         this.viewer.updateLights(debugParams.lights);
                     }
 
-                    this.poseCaptures[this.activeTab] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY);
+                    this.poseCaptures[this.activeTab] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY, { useViewportCamera: true });
 
                     const promptLights = isOriginalLighting ? [{ type: 'ambient', color: '#ffffff', intensity: 1.0 }] : (debugParams.lights || userLights);
                     this.lightingPrompts[this.activeTab] = this.generatePromptFromLights(promptLights);
@@ -4430,7 +5913,7 @@ class PoseStudioWidget {
                         this.viewer.updateLights(this.lightParams);
                     }
 
-                    this.poseCaptures[this.activeTab] = this.viewer.capture(w, h, z, bg, oX, oY);
+                    this.poseCaptures[this.activeTab] = this.viewer.capture(w, h, z, bg, oX, oY, { useViewportCamera: true });
                     this.lightingPrompts[this.activeTab] = this.generatePromptFromLights(isOriginalLighting ? [] : this.lightParams);
 
                     if (isOriginalLighting) {
@@ -4438,6 +5921,8 @@ class PoseStudioWidget {
                     }
                 }
             }
+
+            this.captureSceneLayers(w, h, bg);
         }
 
         // Update hidden pose_data widget
@@ -4450,7 +5935,7 @@ class PoseStudioWidget {
         // (each 1024×1024 PNG is ~500KB base64; multiple poses exceed ComfyUI localStorage limit)
         // They are kept in this.poseCaptures (JS memory) and also uploaded to server-side LRU cache.
         // Only capture_id is stored in the widget so Python can fallback to the cache if needed.
-        const captureId = `vnccs_capture_${this.node.id}`;
+        const captureId = `advanced_pose_studio_capture_${this.node.id}`;
 
         const data = {
             mesh: this.meshParams,
@@ -4458,6 +5943,7 @@ class PoseStudioWidget {
             poses: this.poses,
             lights: this.lightParams,
             activeTab: this.activeTab,
+            sceneCharacters: this.viewer?.getSceneCharacterState ? this.viewer.getSceneCharacterState() : null,
             capture_id: captureId,
             lighting_prompts: this.lightingPrompts,
             background_url: this.exportParams.background_url || null
@@ -4465,21 +5951,23 @@ class PoseStudioWidget {
 
         // Upload captures to server cache (fire-and-forget; errors are non-fatal)
         if (this.poseCaptures && this.poseCaptures.some(c => c)) {
-            fetch('/vnccs/pose_captures_upload', {
+            fetch('/advanced_pose_studio/pose_captures_upload', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     capture_id: captureId,
                     captured_images: this.poseCaptures,
-                    lighting_prompts: this.lightingPrompts || []
+                    lighting_prompts: this.lightingPrompts || [],
+                    background_only: this.backgroundOnlyCapture,
+                    character_layers: this.characterLayerCaptures || []
                 })
-            }).catch(e => console.warn("[VNCCS PoseStudio] Capture upload failed:", e));
+            }).catch(e => console.warn("[Advanced Pose Studio] Capture upload failed:", e));
         }
 
         const widget = this.node.widgets?.find(w => w.name === "pose_data");
         if (widget) {
             widget.value = JSON.stringify(data);
-            console.log("[VNCCS PoseStudio] syncToNode saved data to widget. capture_id:", captureId, "captures count:", this.poseCaptures.length);
+            console.log("[Advanced Pose Studio] syncToNode saved data to widget. capture_id:", captureId, "captures count:", this.poseCaptures.length);
 
             // Force ComfyUI to recognize the state change so it saves to the workflow
             if (widget.callback) {
@@ -4494,17 +5982,17 @@ class PoseStudioWidget {
     }
 
     loadFromNode() {
-        console.log("[VNCCS PoseStudio] loadFromNode started");
+        console.log("[Advanced Pose Studio] loadFromNode started");
         // Load from pose_data widget
         const widget = this.node.widgets?.find(w => w.name === "pose_data");
         if (!widget || !widget.value) {
-            console.log("[VNCCS PoseStudio] loadFromNode: No widget or widget value found.");
+            console.log("[Advanced Pose Studio] loadFromNode: No widget or widget value found.");
             return;
         }
 
         try {
             const data = JSON.parse(widget.value);
-            console.log("[VNCCS PoseStudio] loadFromNode data parsed successfully. Includes poses:", !!data.poses);
+            console.log("[Advanced Pose Studio] loadFromNode data parsed successfully. Includes poses:", !!data.poses);
 
             if (data.mesh) {
                 this.meshParams = { ...this.meshParams, ...data.mesh };
@@ -4570,7 +6058,7 @@ class PoseStudioWidget {
                 this.exportParams.background_url = bgUrl;
                 this.viewer.loadReferenceImage(bgUrl);
                 if (this.refBtn) {
-                    this.refBtn.innerHTML = '<span class="vnccs-ps-btn-icon">🗑️</span> Remove Background';
+                    this.refBtn.innerHTML = '<span class="aps-btn-icon">🗑️</span> Remove Background';
                     this.refBtn.classList.add('danger');
                 }
             }
@@ -4598,7 +6086,13 @@ class PoseStudioWidget {
                 this.viewer.setSkinMode(this.exportParams.skin_type);
             }
 
-            this.loadModel();
+            if (data.sceneCharacters?.characters?.length) {
+                this.restoreSceneCharacters(data.sceneCharacters).then((restored) => {
+                    if (!restored) this.loadModel();
+                });
+            } else {
+                this.loadModel();
+            }
 
         } catch (e) {
             console.error("Failed to parse pose_data:", e);
@@ -4611,10 +6105,10 @@ class PoseStudioWidget {
 
 // === ComfyUI Extension Registration ===
 app.registerExtension({
-    name: "VNCCS.PoseStudio",
+    name: "Advanced.PoseStudio",
 
     setup() {
-        api.addEventListener("vnccs_req_pose_sync", async (event) => {
+        api.addEventListener("advanced_pose_studio_req_pose_sync", async (event) => {
             const nodeId = event.detail.node_id;
             const node = app.graph.getNodeById(nodeId);
             if (node && node.studioWidget) {
@@ -4640,24 +6134,26 @@ app.registerExtension({
                             node_id: nodeId,
                             // Inject captured_images from JS memory (not stored in widget to avoid size overflow)
                             captured_images: node.studioWidget.poseCaptures || [],
-                            lighting_prompts: node.studioWidget.lightingPrompts || []
+                            lighting_prompts: node.studioWidget.lightingPrompts || [],
+                            background_only: node.studioWidget.backgroundOnlyCapture || null,
+                            character_layers: node.studioWidget.characterLayerCaptures || []
                         };
 
-                        await fetch('/vnccs/pose_sync/upload_capture', {
+                        await fetch('/advanced_pose_studio/pose_sync/upload_capture', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(payload)
                         });
                     }
                 } catch (e) {
-                    console.error("[VNCCS] Batch Sync Error:", e);
+                    console.error("[Advanced] Batch Sync Error:", e);
                 }
             }
         });
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData, _app) {
-        if (nodeData.name !== "VNCCS_PoseStudio") return;
+        if (nodeData.name !== "Advanced_Pose_Studio") return;
 
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
@@ -4744,7 +6240,7 @@ app.registerExtension({
         nodeType.prototype.onExecutionStart = function () {
             if (onExecutionStart) onExecutionStart.apply(this, arguments);
 
-            // Removed redundant syncToNode(true) to avoid race conditions with vnccs_req_pose_sync
+            // Removed redundant syncToNode(true) to avoid race conditions with advanced_pose_studio_req_pose_sync
         };
     }
 });

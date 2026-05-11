@@ -1,5 +1,5 @@
 /**
- * VNCCS Pose Studio Core
+ * Advanced Pose Studio Core
  * 
  * Extracted reusable 3D viewer logic.
  */
@@ -84,6 +84,13 @@ const IK_CHAINS = {
         threshold: 0.01
     }
 };
+
+const CHARACTER_MESH_COLORS = [
+    0x5aa7ff, // blue
+    0xffd84d, // yellow
+    0xff5a5a, // red
+    0x58d66d  // green
+];
 
 // === Analytic 2-Bone IK Solver ===
 class AnalyticIKSolver {
@@ -661,6 +668,7 @@ export class PoseViewerCore {
         // IK State
         this.ikController = null;
         this.ikMode = this.options.ikEnabled;
+        this.pointTransformMode = 'rotate';
         this.ikEffectorTargets = new Map();
         this.selectedIKEffector = null; // Currently selected IK effector mesh
         this.selectedPoleTarget = null; // Currently selected pole target mesh
@@ -778,7 +786,7 @@ export class PoseViewerCore {
 
             // Apply buffered data after initialized=true
             if (this.pendingData) {
-                this.loadData(this.pendingData.data, this.pendingData.keepCamera);
+                this.loadData(this.pendingData.data, this.pendingData.keepCamera, this.pendingData.options || {});
                 this.pendingData = null;
             }
 
@@ -810,6 +818,7 @@ export class PoseViewerCore {
         this.renderer = new THREE.WebGLRenderer({
             canvas: this.canvas,
             antialias: true,
+            alpha: true,
             preserveDrawingBuffer: true
         });
         this.renderer.setSize(this.width, this.height);
@@ -907,6 +916,13 @@ export class PoseViewerCore {
 
         this.hoveredBoneName = null;
         this.directDrag = { active: false, chainKey: null, effector: null, plane: null, offset: null };
+
+        // Multi-character scene support. Existing public fields still point to
+        // the active character so the rest of Pose Studio can keep using them.
+        this.sceneCharacters = [];
+        this.activeCharacterId = null;
+        this.nextSceneCharacterId = 1;
+        this.characterTransformMode = false;
     }
 
     // === Light Management ===
@@ -1042,6 +1058,10 @@ export class PoseViewerCore {
                 if (this.ikMode && this.ikController) {
                     const chainKey = this.ikController.getChainForBone(bone.name);
                     if (chainKey && this.ikController.getMode(chainKey) === 'ik') {
+                        if (this.pointTransformMode === 'move') {
+                            this.selectBone(bone);
+                            return;
+                        }
                         const chainDef = IK_CHAINS[chainKey];
                         const effectorObj = this.ikController.effectors[chainDef.effector];
                         if (effectorObj) {
@@ -1106,6 +1126,20 @@ export class PoseViewerCore {
 
         // --- PASS 2: Fallback to Mesh Intersect ---
         // Useful if user clicks on the body near a joint but misses the sphere.
+        if (this.sceneCharacters && this.sceneCharacters.length > 1) {
+            const otherMeshes = this.sceneCharacters
+                .filter(c => c.id !== this.activeCharacterId && c.skinnedMesh)
+                .map(c => c.skinnedMesh);
+            const otherIntersects = raycaster.intersectObjects(otherMeshes, false);
+            if (otherIntersects.length > 0) {
+                const targetId = otherIntersects[0].object.userData.sceneCharacterId;
+                if (targetId) {
+                    this.selectCharacter(targetId);
+                    return;
+                }
+            }
+        }
+
         const meshIntersects = raycaster.intersectObject(this.skinnedMesh, true);
 
         if (meshIntersects.length > 0) {
@@ -1125,6 +1159,10 @@ export class PoseViewerCore {
                 if (this.ikMode && this.ikController) {
                     const chainKey = this.ikController.getChainForBone(nearest.name);
                     if (chainKey && this.ikController.getMode(chainKey) === 'ik') {
+                        if (this.pointTransformMode === 'move') {
+                            this.selectBone(nearest);
+                            return;
+                        }
                         const chainDef = IK_CHAINS[chainKey];
                         const effectorObj = this.ikController.effectors[chainDef.effector];
                         if (effectorObj) {
@@ -1328,12 +1366,16 @@ export class PoseViewerCore {
             }
             this.dispatchPoseChange();
 
-            // Allow TransformControls back for the selected bone (FK) mode now that drag is done
+            // Restore the correct point transform mode after direct IK dragging.
             if (this.selectedBone) {
-                // Completely detach and reattach to flush out any bad matrix internal states
                 this.transform.detach();
-                this.transform.setMode("rotate");
-                this.transform.attach(this.selectedBone);
+                if (this.pointTransformMode === 'move') {
+                    this._attachMoveGizmoForBone(this.selectedBone);
+                } else {
+                    this.transform.setMode("rotate");
+                    this.transform.setSpace("local");
+                    this.transform.attach(this.selectedBone);
+                }
             }
 
             return;
@@ -1341,18 +1383,103 @@ export class PoseViewerCore {
     }
 
     selectBone(bone) {
-        if (this.selectedBone === bone) return;
+        this.characterTransformMode = false;
         this.selectedBone = bone;
 
+        if (this.pointTransformMode === 'move') {
+            if (this.selectedIKEffector) this.selectedIKEffector = null;
+            if (this.selectedPoleTarget) this.selectedPoleTarget = null;
+            this.transform.detach();
+            if (this._attachMoveGizmoForBone(bone)) {
+                this.updateMarkers();
+                this.requestRender();
+                return;
+            }
+            this.updateMarkers();
+            this.requestRender();
+            return;
+        }
+
         // Attach transform for rotation (FK)
+        if (this.selectedIKEffector) this.selectedIKEffector = null;
+        if (this.selectedPoleTarget) this.selectedPoleTarget = null;
+        this.transform.detach();
         this.transform.setMode("rotate");
+        this.transform.setSpace("local");
         this.transform.attach(bone);
         this.updateMarkers();
+        this.requestRender();
+    }
 
-        // Ensure IK effector is deselected if we just want FK bone rotation
-        if (this.selectedIKEffector) {
-            this.selectedIKEffector = null;
+    setPointTransformMode(mode = 'rotate') {
+        this.pointTransformMode = mode === 'move' ? 'move' : 'rotate';
+        if (this.characterTransformMode) return;
+
+        if (this.pointTransformMode === 'move') {
+            if (this.selectedIKEffector) this.selectedIKEffector = null;
+            if (this.selectedPoleTarget) this.selectedPoleTarget = null;
+            this.transform.detach();
+            if (this.selectedBone && this._attachMoveGizmoForBone(this.selectedBone)) {
+                this.updateMarkers();
+                this.requestRender();
+                return;
+            }
+            this.updateMarkers();
+            this.requestRender();
+            return;
         }
+
+        if (this.selectedIKEffector) this.selectedIKEffector = null;
+        if (this.selectedPoleTarget) this.selectedPoleTarget = null;
+        if (this.selectedBone) {
+            this.transform.detach();
+            this.transform.setMode("rotate");
+            this.transform.setSpace("local");
+            this.transform.attach(this.selectedBone);
+        }
+        this.updateMarkers();
+        this.requestRender();
+    }
+
+    _attachMoveGizmoForBone(bone) {
+        if (!bone || !this.ikMode || !this.ikController) return false;
+        const chainKey = this.ikController.getChainForBone(bone.name);
+        if (!chainKey || this.ikController.getMode(chainKey) !== 'ik') return false;
+        const chainDef = IK_CHAINS[chainKey];
+        if (!chainDef) return false;
+
+        if (bone.name === chainDef.poleBone) {
+            this.ensurePoleTargetsCreated();
+            const pole = this.ikController.poleTargets[chainKey];
+            if (!pole) return false;
+            const bonePos = new this.THREE.Vector3();
+            bone.getWorldPosition(bonePos);
+            pole.position.copy(bonePos);
+            this.ikController.setPoleMode(chainKey, "on");
+            this.selectedIKEffector = null;
+            this.selectedPoleTarget = pole;
+            this.transform.detach();
+            this.transform.setMode("translate");
+            this.transform.setSpace("world");
+            this.transform.attach(pole);
+            return true;
+        }
+
+        const effector = this.ikController.effectors[chainDef.effector];
+        if (!effector) return false;
+        const effectorBone = this.bones[chainDef.effector];
+        if (effectorBone) {
+            const bonePos = new this.THREE.Vector3();
+            effectorBone.getWorldPosition(bonePos);
+            effector.position.copy(bonePos);
+        }
+        this.selectedIKEffector = effector;
+        this.selectedPoleTarget = null;
+        this.transform.detach();
+        this.transform.setMode("translate");
+        this.transform.setSpace("world");
+        this.transform.attach(effector);
+        return true;
     }
 
     deselectBone() {
@@ -1910,14 +2037,17 @@ export class PoseViewerCore {
         this.requestRender();
     }
 
-    loadData(data, keepCamera = false) {
+    loadData(data, keepCamera = false, options = {}) {
         if (!this.initialized || !this.THREE || !this.scene) {
-            this.pendingData = { data, keepCamera };
+            this.pendingData = { data, keepCamera, options };
             return;
         }
         if (!data || !data.vertices || !data.bones) return;
 
         this._cleanupPrevious();
+        this.sceneCharacters = [];
+        this.activeCharacterId = null;
+        this.nextSceneCharacterId = 1;
 
         const { geometry, vertices, indices } = this._initMeshGeometry(data);
         const THREE = this.THREE;
@@ -1951,11 +2081,420 @@ export class PoseViewerCore {
         }
 
         this._initIKHelpers();
+        this._registerActiveCharacter();
+        this._applyCharacterMetadata(this.sceneCharacters.find(c => c.id === this.activeCharacterId), options);
+        this._applySceneCharacterColors();
         this.requestRender();
     }
 
-    _cleanupPrevious() {
+    addCharacterData(data, options = {}) {
+        if (!this.initialized || !this.THREE || !this.scene || !data || !data.vertices || !data.bones) return null;
+        if (this.sceneCharacters.length >= 4) return null;
+
+        this._rememberActiveCharacter();
+        const previousId = this.activeCharacterId;
+        const previous = this.sceneCharacters.find(c => c.id === previousId);
+        if (previous) this._setCharacterControlsVisible(previous, false);
+
+        this.skinnedMesh = null;
+        this.skeleton = null;
+        this.bones = {};
+        this.boneList = [];
+        this.selectedBone = null;
+        this.jointMarkers = [];
+        this.skeletonHelper = null;
+        this.ikController = null;
+        this.selectedIKEffector = null;
+        this.selectedPoleTarget = null;
+
+        const { geometry, vertices } = this._initMeshGeometry(data);
+        this._initSkeleton(data, geometry, vertices);
+
+        const spacing = 2.4;
+        this.skinnedMesh.position.x = (this.sceneCharacters.length - 0.5) * spacing;
+        this.skinnedMesh.userData.sceneCharacterName = options.name || "";
+
+        this._createJointMarkers();
+        this._initIKHelpers();
+
+        const id = `character_${this.nextSceneCharacterId++}`;
+        this._registerActiveCharacter(id);
+        const character = this.sceneCharacters.find(c => c.id === id);
+        if (character) this._applyCharacterMetadata(character, options);
+        this._applySceneCharacterColors();
+        this.activeCharacterId = id;
+        this._setCharacterControlsVisible(this.sceneCharacters.find(c => c.id === id), true);
+        this.requestRender();
+        return id;
+    }
+
+    replaceActiveCharacterData(data, options = {}) {
+        if (!this.initialized || !this.THREE || !this.scene || !data || !data.vertices || !data.bones) return false;
+        const oldCharacter = this.sceneCharacters.find(c => c.id === this.activeCharacterId);
+        if (!oldCharacter) {
+            this.loadData(data, true, options);
+            return true;
+        }
+
+        const oldId = oldCharacter.id;
+        const oldName = options.name !== undefined ? options.name : oldCharacter.name;
+        const oldImage = options.image || oldCharacter.image || null;
+        const oldPosition = oldCharacter.skinnedMesh?.position?.clone();
+        const oldRotation = oldCharacter.skinnedMesh?.rotation?.clone();
+        const oldScale = oldCharacter.skinnedMesh?.scale?.clone();
+
+        this._rememberActiveCharacter();
+        this._removeCharacterFromScene(oldCharacter);
+        this.sceneCharacters = this.sceneCharacters.filter(c => c !== oldCharacter);
+
+        this.skinnedMesh = null;
+        this.skeleton = null;
+        this.bones = {};
+        this.boneList = [];
+        this.selectedBone = null;
+        this.jointMarkers = [];
+        this.skeletonHelper = null;
+        this.ikController = null;
+        this.selectedIKEffector = null;
+        this.selectedPoleTarget = null;
+
+        const { geometry, vertices } = this._initMeshGeometry(data);
+        this._initSkeleton(data, geometry, vertices);
+        if (oldPosition) this.skinnedMesh.position.copy(oldPosition);
+        if (oldRotation) this.skinnedMesh.rotation.copy(oldRotation);
+        if (oldScale) this.skinnedMesh.scale.copy(oldScale);
+
+        this._createJointMarkers();
+        this._initIKHelpers();
+        this._registerActiveCharacter(oldId);
+        const newCharacter = this.sceneCharacters.find(c => c.id === oldId);
+        this._applyCharacterMetadata(newCharacter, { name: oldName, image: oldImage });
+        this._applySceneCharacterColors();
+        this._setCharacterControlsVisible(newCharacter, true);
+
+        if (this.characterTransformMode) this.setCharacterTransformMode(true, this.characterTransformGizmoMode || "translate");
+        this.requestRender();
+        return true;
+    }
+
+    deleteActiveCharacter() {
+        this._rememberActiveCharacter();
+        const character = this.sceneCharacters.find(c => c.id === this.activeCharacterId);
+        if (!character) return false;
+
+        this._removeCharacterFromScene(character);
+        this.sceneCharacters = this.sceneCharacters.filter(c => c !== character);
+        this._applySceneCharacterColors();
+
+        const next = this.sceneCharacters[0] || null;
+        if (next) {
+            this._activateCharacter(next.id);
+        } else {
+            this.activeCharacterId = null;
+            this.skinnedMesh = null;
+            this.skeleton = null;
+            this.bones = {};
+            this.boneList = [];
+            this.jointMarkers = [];
+            this.skeletonHelper = null;
+            this.ikController = null;
+            this.transform.detach();
+        }
+
+        this.requestRender();
+        return true;
+    }
+
+    selectCharacter(characterId) {
+        return this._activateCharacter(characterId);
+    }
+
+    getCharacterSummary() {
+        this._rememberActiveCharacter();
+        return this.sceneCharacters.map((c, idx) => ({
+            id: c.id,
+            label: c.name || `Character ${idx + 1}`,
+            image: c.image || null,
+            active: c.id === this.activeCharacterId
+        }));
+    }
+
+    getSceneCharacterState() {
+        this._rememberActiveCharacter();
+        return {
+            activeCharacterId: this.activeCharacterId || null,
+            characters: this.sceneCharacters.map((c, idx) => ({
+                id: c.id,
+                name: c.name || "",
+                image: c.image || null,
+                meshParams: c.meshParams || null,
+                pose: this._getPoseForCharacter(c),
+                position: c.skinnedMesh ? [c.skinnedMesh.position.x, c.skinnedMesh.position.y, c.skinnedMesh.position.z] : [0, 0, 0],
+                rotation: c.skinnedMesh ? [c.skinnedMesh.rotation.x, c.skinnedMesh.rotation.y, c.skinnedMesh.rotation.z] : [0, 0, 0],
+                scale: c.skinnedMesh ? [c.skinnedMesh.scale.x, c.skinnedMesh.scale.y, c.skinnedMesh.scale.z] : [1, 1, 1],
+                order: idx
+            }))
+        };
+    }
+
+    _getPoseForCharacter(character) {
+        if (!character?.boneList) return { bones: {} };
+        const bones = {};
+        for (const b of character.boneList) {
+            const rot = b.rotation;
+            if (Math.abs(rot.x) > 1e-4 || Math.abs(rot.y) > 1e-4 || Math.abs(rot.z) > 1e-4) {
+                bones[b.name] = [
+                    rot.x * 180 / Math.PI,
+                    rot.y * 180 / Math.PI,
+                    rot.z * 180 / Math.PI
+                ];
+            }
+        }
+
+        const ikEffectorPositions = {};
+        if (character.ikController) {
+            for (const [name, effector] of Object.entries(character.ikController.effectors || {})) {
+                ikEffectorPositions[name] = [effector.position.x, effector.position.y, effector.position.z];
+            }
+        }
+
+        const poleTargetPositions = {};
+        if (character.ikController) {
+            for (const [chainKey, pole] of Object.entries(character.ikController.poleTargets || {})) {
+                poleTargetPositions[chainKey] = [pole.position.x, pole.position.y, pole.position.z];
+            }
+        }
+
+        const hipBonePosition = {};
+        const characterBones = character.bones || {};
+        for (const chainKey of Object.keys(IK_CHAINS)) {
+            const chainDef = IK_CHAINS[chainKey];
+            if (chainDef.isRoot && chainDef.effector) {
+                const hipBone = characterBones[chainDef.effector];
+                if (hipBone) hipBonePosition[chainKey] = [hipBone.position.x, hipBone.position.y, hipBone.position.z];
+            }
+        }
+
+        return {
+            bones,
+            modelRotation: [0, 0, 0],
+            ikEffectorPositions,
+            poleTargetPositions,
+            hipBonePosition
+        };
+    }
+
+    _createCharacterPortrait(dataUrl, name = "") {
+        if (!dataUrl || !this.THREE) return null;
+        const THREE = this.THREE;
+        const texture = new THREE.TextureLoader().load(dataUrl, () => this.requestRender());
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+            depthWrite: false
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.name = `${name || "Character"} Portrait`;
+        sprite.renderOrder = 1000;
+        sprite.position.set(0, 17.5, 0);
+        sprite.scale.set(4.0, 4.0, 1);
+        return sprite;
+    }
+
+    _applyCharacterMetadata(character, options = {}) {
+        if (!character) return;
+        if (options.name !== undefined) {
+            character.name = options.name || "";
+            if (character.skinnedMesh) character.skinnedMesh.userData.sceneCharacterName = character.name;
+        }
+
+        if (options.image !== undefined) {
+            character.image = options.image || null;
+        }
+
+        if (options.meshParams !== undefined) {
+            character.meshParams = options.meshParams ? { ...options.meshParams } : null;
+        }
+
+    }
+
+    _applySceneCharacterColors() {
+        if (!this.sceneCharacters || !this.THREE) return;
+        this.sceneCharacters.forEach((character, index) => {
+            const color = CHARACTER_MESH_COLORS[index] || 0xffffff;
+            character.meshColor = color;
+            const material = character.skinnedMesh?.material;
+            if (material?.color) {
+                material.color.setHex(color);
+                material.needsUpdate = true;
+            }
+        });
+        this.requestRender();
+    }
+
+    clearTransformSelection() {
+        const character = this.sceneCharacters?.find(c => c.id === this.activeCharacterId);
+        this.selectedBone = null;
+        this.selectedIKEffector = null;
+        this.selectedPoleTarget = null;
+        if (character) {
+            character.selectedBone = null;
+            character.selectedIKEffector = null;
+            character.selectedPoleTarget = null;
+        }
+        if (this.transform) {
+            if (typeof this.transform.reset === "function") this.transform.reset();
+            this.transform.detach();
+        }
+        this.updateMarkers();
+        this.requestRender();
+    }
+
+    setCharacterTransformMode(enabled = true, mode = "translate") {
+        this.characterTransformMode = enabled;
+        this.characterTransformGizmoMode = mode === "rotate" ? "rotate" : "translate";
+        const character = this.sceneCharacters.find(c => c.id === this.activeCharacterId);
+        this.clearTransformSelection();
+        if (!enabled || !character || !character.skinnedMesh) {
+            if (this.transform) {
+                this.transform.setMode("rotate");
+                this.transform.setSpace("local");
+            }
+            return;
+        }
+
+        this.transform.setMode(this.characterTransformGizmoMode);
+        this.transform.setSpace("world");
+        this.transform.attach(character.skinnedMesh);
+        this.updateMarkers();
+        this.requestRender();
+    }
+
+    setCharacterTransformGizmoMode(mode = "translate") {
+        this.characterTransformGizmoMode = mode === "rotate" ? "rotate" : "translate";
+        if (this.characterTransformMode) {
+            this.setCharacterTransformMode(true, this.characterTransformGizmoMode);
+        }
+    }
+
+    _registerActiveCharacter(id = null) {
+        if (!this.skinnedMesh) return null;
+        const characterId = id || this.activeCharacterId || `character_${this.nextSceneCharacterId++}`;
+        let character = this.sceneCharacters.find(c => c.id === characterId);
+        if (!character) {
+            character = { id: characterId };
+            this.sceneCharacters.push(character);
+        }
+        this.activeCharacterId = characterId;
         if (this.skinnedMesh) {
+            this.skinnedMesh.userData.sceneCharacterId = characterId;
+        }
+        Object.assign(character, this._activeCharacterState());
+        return character;
+    }
+
+    _rememberActiveCharacter() {
+        const character = this.sceneCharacters.find(c => c.id === this.activeCharacterId);
+        if (character && this.skinnedMesh) {
+            Object.assign(character, this._activeCharacterState());
+        }
+    }
+
+    _activeCharacterState() {
+        return {
+            skinnedMesh: this.skinnedMesh,
+            skeleton: this.skeleton,
+            bones: this.bones,
+            boneList: this.boneList,
+            selectedBone: this.selectedBone,
+            jointMarkers: this.jointMarkers,
+            skeletonHelper: this.skeletonHelper,
+            initialBoneStates: this.initialBoneStates,
+            ikController: this.ikController,
+            selectedIKEffector: this.selectedIKEffector,
+            selectedPoleTarget: this.selectedPoleTarget
+        };
+    }
+
+    _activateCharacter(characterId) {
+        const next = this.sceneCharacters.find(c => c.id === characterId);
+        if (!next) return false;
+
+        this._rememberActiveCharacter();
+        const current = this.sceneCharacters.find(c => c.id === this.activeCharacterId);
+        if (current) this._setCharacterControlsVisible(current, false);
+
+        this.activeCharacterId = next.id;
+        this.skinnedMesh = next.skinnedMesh;
+        this.skeleton = next.skeleton;
+        this.bones = next.bones;
+        this.boneList = next.boneList;
+        this.selectedBone = next.selectedBone;
+        this.jointMarkers = next.jointMarkers;
+        this.skeletonHelper = next.skeletonHelper;
+        this.initialBoneStates = next.initialBoneStates;
+        this.ikController = next.ikController;
+        this.selectedIKEffector = next.selectedIKEffector;
+        this.selectedPoleTarget = next.selectedPoleTarget;
+
+        this._setCharacterControlsVisible(next, true);
+        this.transform.detach();
+        if (this.characterTransformMode && this.skinnedMesh) {
+            this.transform.setMode(this.characterTransformGizmoMode || "translate");
+            this.transform.setSpace("world");
+            this.transform.attach(this.skinnedMesh);
+        } else if (this.selectedBone) {
+            this.transform.setMode("rotate");
+            this.transform.setSpace("local");
+            this.transform.attach(this.selectedBone);
+        }
+        this.updateMarkers();
+        this.requestRender();
+        if (this.options.onCharacterSelectionChange) {
+            this.options.onCharacterSelectionChange(this.getCharacterSummary());
+        }
+        return true;
+    }
+
+    _setCharacterControlsVisible(character, visible) {
+        if (!character) return;
+        if (character.skeletonHelper) character.skeletonHelper.visible = visible;
+        if (character.jointMarkers) character.jointMarkers.forEach(m => m.visible = visible);
+        const controller = character.ikController;
+        if (controller) {
+            Object.values(controller.effectors || {}).forEach(e => e.visible = visible && this.ikMode);
+            Object.values(controller.poleTargets || {}).forEach(p => p.visible = false);
+        }
+    }
+
+    _removeCharacterFromScene(character) {
+        this._setCharacterControlsVisible(character, false);
+        if (character.skinnedMesh) {
+            this.scene.remove(character.skinnedMesh);
+            character.skinnedMesh.geometry?.dispose();
+            character.skinnedMesh.material?.dispose();
+        }
+        if (character.skeletonHelper) this.scene.remove(character.skeletonHelper);
+        if (character.jointMarkers) {
+            character.jointMarkers.forEach(m => {
+                if (m.parent) m.parent.remove(m);
+            });
+        }
+        const controller = character.ikController;
+        if (controller) {
+            Object.values(controller.effectors || {}).forEach(e => this.scene.remove(e));
+            Object.values(controller.poleTargets || {}).forEach(p => this.scene.remove(p));
+        }
+    }
+
+    _cleanupPrevious() {
+        if (this.sceneCharacters && this.sceneCharacters.length > 0) {
+            this.sceneCharacters.forEach(c => this._removeCharacterFromScene(c));
+            this.sceneCharacters = [];
+        } else if (this.skinnedMesh) {
             this.scene.remove(this.skinnedMesh);
             this.skinnedMesh.geometry.dispose();
             this.skinnedMesh.material.dispose();
@@ -2201,6 +2740,7 @@ export class PoseViewerCore {
             }
             this.skinnedMesh.material.color.setHex(0xaaaaaa);
             this.skinnedMesh.material.needsUpdate = true;
+            this._applySceneCharacterColors();
             this.requestRender();
             return;
         }
@@ -2224,6 +2764,7 @@ export class PoseViewerCore {
                 this.cachedSkinTexture = tex;
                 this.cachedSkinType = skinType;
 
+                this._applySceneCharacterColors();
                 this.requestRender();
             },
             undefined,
@@ -2440,6 +2981,194 @@ export class PoseViewerCore {
         this.requestRender();
     }
 
+    applyDepthPoseInitializer(parsed, depthSamples, options = {}) {
+        if (!parsed?.joints || !depthSamples || !this.ikController || !this.THREE || !this.bones) return false;
+
+        const THREE = this.THREE;
+        const strength = Number.isFinite(options.strength) ? options.strength : 0.75;
+        const minConfidence = Number.isFinite(options.minConfidence) ? options.minConfidence : 0.08;
+        const joints = parsed.joints;
+        const baselineNames = ["neck", "mid_hip", "l_hip", "r_hip"].filter(name => depthSamples[name] !== undefined);
+        const baseline = baselineNames.length
+            ? baselineNames.reduce((sum, name) => sum + Number(depthSamples[name] || 0), 0) / baselineNames.length
+            : 0;
+
+        const jointDepthOffset = (name) => {
+            if (depthSamples[name] === undefined) return null;
+            const joint = joints[name];
+            if (!joint || joint.c < minConfidence) return null;
+            return (Number(depthSamples[name]) - baseline) * strength;
+        };
+
+        const getBoneWorldPosition = (boneName) => {
+            const bone = this.bones[boneName];
+            if (!bone) return null;
+            const pos = new THREE.Vector3();
+            bone.getWorldPosition(pos);
+            return pos;
+        };
+
+        this.updateIKEffectorPositions("all");
+        this.ensurePoleTargetsCreated();
+
+        let applied = false;
+        const chainMap = [
+            { chainKey: "leftArm", effector: "hand_l", joint: "l_wrist", pole: "l_elbow" },
+            { chainKey: "rightArm", effector: "hand_r", joint: "r_wrist", pole: "r_elbow" },
+            { chainKey: "leftLeg", effector: "foot_l", joint: "l_ankle", pole: "l_knee" },
+            { chainKey: "rightLeg", effector: "foot_r", joint: "r_ankle", pole: "r_knee" },
+        ];
+
+        for (const item of chainMap) {
+            const chainDef = IK_CHAINS[item.chainKey];
+            const effector = this.ikController.effectors[item.effector];
+            if (!chainDef || !effector || this.ikController.getMode(item.chainKey) !== "ik") continue;
+
+            const target = getBoneWorldPosition(item.effector) || effector.position.clone();
+            const offset = jointDepthOffset(item.joint);
+            if (offset === null) continue;
+            target.z += offset;
+            effector.position.copy(target);
+
+            const poleTarget = this.ikController.poleTargets[item.chainKey];
+            const poleOffset = jointDepthOffset(item.pole);
+            if (poleTarget && poleOffset !== null) {
+                const polePos = getBoneWorldPosition(chainDef.poleBone) || poleTarget.position.clone();
+                polePos.z += poleOffset;
+                poleTarget.position.copy(polePos);
+                this.ikController.setPoleMode(item.chainKey, "on");
+            }
+
+            this.ikController.solveWithPole(chainDef, this.bones, target, item.chainKey);
+            for (const bone of this.boneList) bone.updateMatrixWorld(true);
+            applied = true;
+        }
+
+        const hipOffset = jointDepthOffset("mid_hip");
+        const hipChain = IK_CHAINS.hips;
+        const hipEffector = hipChain?.effector ? this.ikController.effectors[hipChain.effector] : null;
+        const hipBone = hipChain?.effector ? this.bones[hipChain.effector] : null;
+        if (hipOffset !== null && hipEffector && hipBone) {
+            const hipTarget = getBoneWorldPosition(hipChain.effector);
+            if (hipTarget) {
+                hipTarget.z += hipOffset * 0.35;
+                hipEffector.position.copy(hipTarget);
+                const localTarget = hipTarget.clone();
+                if (hipBone.parent) hipBone.parent.worldToLocal(localTarget);
+                hipBone.position.copy(localTarget);
+                hipBone.updateMatrixWorld(true);
+                applied = true;
+            }
+        }
+
+        if (applied) {
+            if (this.skeleton) this.skeleton.update();
+            if (this.skinnedMesh) this.skinnedMesh.updateMatrixWorld(true);
+            this.updateIKEffectorPositions("nonSelected");
+            this.updatePoleTargetVisibility();
+            this.requestRender();
+        }
+
+        return applied;
+    }
+
+    apply2DSkeletonIKInitializer(parsed, options = {}) {
+        if (!parsed?.joints || !this.ikController || !this.THREE || !this.bones) return false;
+
+        const THREE = this.THREE;
+        const joints = parsed.joints;
+        const minConfidence = Number.isFinite(options.minConfidence) ? options.minConfidence : 0.08;
+        const strength = Number.isFinite(options.strength) ? options.strength : 0.9;
+        const valid = (name) => joints[name] && Number(joints[name].c || 0) >= minConfidence;
+        const coordWidth = Math.max(1, Number(parsed.canvasWidth || 512));
+        const coordHeight = Math.max(1, Number(parsed.canvasHeight || 512));
+
+        const getBoneWorldPosition = (boneName) => {
+            const bone = this.bones[boneName];
+            if (!bone) return null;
+            const pos = new THREE.Vector3();
+            bone.getWorldPosition(pos);
+            return pos;
+        };
+
+        const hipChain = IK_CHAINS.hips;
+        const hipAnchor = hipChain?.effector ? getBoneWorldPosition(hipChain.effector) : null;
+        const neckAnchor = getBoneWorldPosition("neck_01") || getBoneWorldPosition("spine_03") || hipAnchor;
+        if (!hipAnchor || !neckAnchor || !valid("mid_hip")) return false;
+
+        const imageShoulderWidth = valid("l_shoulder") && valid("r_shoulder")
+            ? Math.abs(joints.l_shoulder.x - joints.r_shoulder.x)
+            : 0;
+        const modelShoulderLeft = getBoneWorldPosition("upperarm_l") || getBoneWorldPosition("clavicle_l");
+        const modelShoulderRight = getBoneWorldPosition("upperarm_r") || getBoneWorldPosition("clavicle_r");
+        const modelShoulderWidth = modelShoulderLeft && modelShoulderRight ? modelShoulderLeft.distanceTo(modelShoulderRight) : 0;
+        const imageTorsoHeight = valid("neck") ? Math.abs(joints.neck.y - joints.mid_hip.y) : 0;
+        const modelTorsoHeight = neckAnchor.distanceTo(hipAnchor);
+        const scaleCandidates = [];
+        if (imageShoulderWidth > 1 && modelShoulderWidth > 0.01) scaleCandidates.push(modelShoulderWidth / imageShoulderWidth);
+        if (imageTorsoHeight > 1 && modelTorsoHeight > 0.01) scaleCandidates.push(modelTorsoHeight / imageTorsoHeight);
+        const scale = scaleCandidates.length
+            ? scaleCandidates.reduce((sum, value) => sum + value, 0) / scaleCandidates.length
+            : modelTorsoHeight / (coordHeight * 0.28);
+
+        const imagePointToWorld = (name, anchorName = "mid_hip", anchorWorld = hipAnchor) => {
+            if (!valid(name) || !valid(anchorName) || !anchorWorld) return null;
+            const dx = (joints[name].x - joints[anchorName].x) * scale * strength;
+            const dy = -(joints[name].y - joints[anchorName].y) * scale * strength;
+            const target = anchorWorld.clone();
+            target.x += dx;
+            target.y += dy;
+            return target;
+        };
+
+        this.updateIKEffectorPositions("all");
+        this.ensurePoleTargetsCreated();
+
+        let applied = false;
+        const chainMap = [
+            { chainKey: "leftArm", effector: "hand_l", joint: "l_wrist", pole: "l_elbow", anchor: "neck", anchorWorld: neckAnchor },
+            { chainKey: "rightArm", effector: "hand_r", joint: "r_wrist", pole: "r_elbow", anchor: "neck", anchorWorld: neckAnchor },
+            { chainKey: "leftLeg", effector: "foot_l", joint: "l_ankle", pole: "l_knee", anchor: "mid_hip", anchorWorld: hipAnchor },
+            { chainKey: "rightLeg", effector: "foot_r", joint: "r_ankle", pole: "r_knee", anchor: "mid_hip", anchorWorld: hipAnchor },
+        ];
+
+        for (const item of chainMap) {
+            const chainDef = IK_CHAINS[item.chainKey];
+            const effector = this.ikController.effectors[item.effector];
+            if (!chainDef || !effector || this.ikController.getMode(item.chainKey) !== "ik") continue;
+
+            const target = imagePointToWorld(item.joint, item.anchor, item.anchorWorld);
+            if (!target) continue;
+
+            const existing = getBoneWorldPosition(item.effector);
+            if (existing) target.z = existing.z;
+            effector.position.copy(target);
+
+            const poleTarget = this.ikController.poleTargets[item.chainKey];
+            const polePos = imagePointToWorld(item.pole, item.anchor, item.anchorWorld);
+            if (poleTarget && polePos) {
+                const existingPole = getBoneWorldPosition(chainDef.poleBone);
+                if (existingPole) polePos.z = existingPole.z;
+                poleTarget.position.copy(polePos);
+                this.ikController.setPoleMode(item.chainKey, "on");
+            }
+
+            this.ikController.solveWithPole(chainDef, this.bones, target, item.chainKey);
+            for (const bone of this.boneList) bone.updateMatrixWorld(true);
+            applied = true;
+        }
+
+        if (applied) {
+            if (this.skeleton) this.skeleton.update();
+            if (this.skinnedMesh) this.skinnedMesh.updateMatrixWorld(true);
+            this.updateIKEffectorPositions("nonSelected");
+            this.updatePoleTargetVisibility();
+            this.requestRender();
+        }
+
+        return applied;
+    }
+
     setCameraParams(params) {
         if (!params) return;
         if (this.cameraParams) {
@@ -2543,56 +3272,32 @@ export class PoseViewerCore {
         }
         const THREE = this.THREE;
 
-        // Create plane if needed
-        if (!this.refPlane) {
-            const geo = new THREE.PlaneGeometry(1, 1);
-            const mat = new THREE.MeshBasicMaterial({
-                color: 0xffffff,
-                transparent: true,
-                opacity: 1.0,
-                side: THREE.DoubleSide,
-                depthWrite: false
-            });
-            this.refPlane = new THREE.Mesh(geo, mat);
-            // Render first (background)
-            this.refPlane.renderOrder = -1;
-            // Attach to camera so it moves with it
-            this.captureCamera.add(this.refPlane);
-
-            // Initial positioning (will be fixed in updateCaptureCamera)
-            this.refPlane.position.set(0, 0, -50);
-            this.refPlane.rotation.set(0, 0, 0);
-        }
-
         // Load texture
         new THREE.TextureLoader().load(url, (tex) => {
             // Ensure sRGB for real colors
             if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
             else if (THREE.sRGBEncoding) tex.encoding = THREE.sRGBEncoding;
 
-            if (this.refPlane) {
-                this.refPlane.material.map = tex;
-                this.refPlane.material.needsUpdate = true;
-                this.refPlane.visible = true;
-                this.requestRender();
+            if (this.referenceTexture && this.referenceTexture !== tex) {
+                this.referenceTexture.dispose?.();
             }
+            this.referenceTexture = tex;
+            this.scene.background = tex;
+            this.requestRender();
         });
     }
 
     removeReferenceImage() {
-        if (!this.refPlane) return;
-        this.captureCamera.remove(this.refPlane);
-        if (this.refPlane.geometry) this.refPlane.geometry.dispose();
-        if (this.refPlane.material) {
-            if (this.refPlane.material.map) this.refPlane.material.map.dispose();
-            this.refPlane.material.dispose();
+        if (this.referenceTexture) {
+            this.referenceTexture.dispose?.();
+            this.referenceTexture = null;
         }
-        this.refPlane = null;
+        this.scene.background = new this.THREE.Color(0x1a1a2e);
         this.requestRender();
     }
 
     hasReferenceImage() {
-        return this.refPlane !== null && this.refPlane !== undefined;
+        return this.referenceTexture !== null && this.referenceTexture !== undefined;
     }
 
     updateCaptureCamera(width, height, zoom = 1.0, offsetX = 0, offsetY = 0) {
@@ -2612,26 +3317,6 @@ export class PoseViewerCore {
         this.captureCamera.updateProjectionMatrix();
         this.captureCamera.position.set(target.x, target.y, target.z + dist);
         this.captureCamera.lookAt(target);
-
-        // Update Reference Plane
-        if (this.refPlane) {
-            // Distance from camera to plane (near far clip)
-            const planeDist = 95;
-
-            // Calculate height at that distance
-            // h = 2 * dist * tan(fov/2). 
-            // Effective FOV is scaled by zoom? 
-            // THREE.js zoom divides the frustum size. 
-            // So visible height = height / zoom.
-
-            const vFOV = (this.captureCamera.fov * Math.PI) / 180;
-            const h = 2 * planeDist * Math.tan(vFOV / 2) / Math.max(0.1, zoom);
-            const w = h * this.captureCamera.aspect;
-
-            this.refPlane.position.set(0, 0, -planeDist);
-            this.refPlane.scale.set(w, h, 1);
-            this.refPlane.rotation.set(0, 0, 0); // Ensure it faces camera (camera looks down -Z, plane is XY)
-        }
 
         if (this.captureFrame) {
             const vFOV = (this.captureCamera.fov * Math.PI) / 180;
@@ -2676,43 +3361,63 @@ export class PoseViewerCore {
         this.orbit.enableDamping = prevDamping;
     }
 
-    capture(width, height, zoom, bgColor, offsetX = 0, offsetY = 0) {
+    capture(width, height, zoom, bgColor, offsetX = 0, offsetY = 0, options = {}) {
         if (!this.initialized) return null;
 
-        // Ensure camera is setup
-        this.updateCaptureCamera(width, height, zoom, offsetX, offsetY);
-
-        // Hide UI elements
-        const markersVisible = this.jointMarkers[0]?.visible ?? true;
-        const transformVisible = this.transform ? this.transform.visible : true;
-
-        // Hide Helpers
-        if (this.transform) this.transform.visible = false;
-        if (this.skeletonHelper) this.skeletonHelper.visible = false;
-        if (this.gridHelper) this.gridHelper.visible = false;
-        if (this.captureFrame) this.captureFrame.visible = false;
-        this.jointMarkers.forEach(m => m.visible = false);
-
-        // Hide IK effectors and pole targets
-        const effectorVisibility = {};
-        const poleVisibility = {};
-        if (this.ikController) {
-            for (const [name, effector] of Object.entries(this.ikController.effectors)) {
-                effectorVisibility[name] = effector.visible;
-                effector.visible = false;
-            }
-            for (const [key, pole] of Object.entries(this.ikController.poleTargets)) {
-                poleVisibility[key] = pole.visible;
-                pole.visible = false;
-            }
+        const useViewportCamera = options.useViewportCamera === true;
+        const backgroundOnly = options.backgroundOnly === true;
+        const transparent = options.transparent === true;
+        const characterIndex = Number.isInteger(options.characterIndex) ? options.characterIndex : null;
+        if (!useViewportCamera) {
+            // Ensure camera is setup
+            this.updateCaptureCamera(width, height, zoom, offsetX, offsetY);
         }
+
+        const visibilityRecords = [];
+        const rememberVisibility = (obj) => {
+            if (!obj || visibilityRecords.some(r => r.obj === obj)) return;
+            visibilityRecords.push({ obj, visible: obj.visible });
+        };
+        const setVisible = (obj, visible) => {
+            if (!obj) return;
+            rememberVisibility(obj);
+            obj.visible = visible;
+        };
+
+        // Hide UI helpers and isolate the requested render layer.
+        setVisible(this.transform, false);
+        setVisible(this.gridHelper, false);
+        setVisible(this.captureFrame, false);
+
+        const characters = (this.sceneCharacters && this.sceneCharacters.length > 0)
+            ? this.sceneCharacters
+            : [{ skinnedMesh: this.skinnedMesh, skeletonHelper: this.skeletonHelper, jointMarkers: this.jointMarkers, ikController: this.ikController }];
+
+        characters.forEach((character, index) => {
+            const showMesh = !backgroundOnly && (characterIndex === null || characterIndex === index);
+            setVisible(character.skinnedMesh, showMesh);
+            setVisible(character.skeletonHelper, false);
+            (character.jointMarkers || []).forEach(marker => setVisible(marker, false));
+            const controller = character.ikController;
+            if (controller) {
+                Object.values(controller.effectors || {}).forEach(effector => setVisible(effector, false));
+                Object.values(controller.poleTargets || {}).forEach(pole => setVisible(pole, false));
+            }
+        });
 
         // Background Override
         const oldBg = this.scene.background;
-        if (bgColor && Array.isArray(bgColor) && bgColor.length === 3) {
+        const oldClearAlpha = this.renderer.getClearAlpha();
+        const oldClearColor = new this.THREE.Color();
+        this.renderer.getClearColor(oldClearColor);
+        if (transparent) {
+            this.scene.background = null;
+            this.renderer.setClearAlpha(0);
+        } else if (!this.referenceTexture && bgColor && Array.isArray(bgColor) && bgColor.length === 3) {
             this.scene.background = new this.THREE.Color(
                 bgColor[0] / 255, bgColor[1] / 255, bgColor[2] / 255
             );
+            this.renderer.setClearAlpha(1);
         }
 
         let dataURL = null;
@@ -2726,8 +3431,8 @@ export class PoseViewerCore {
             this.renderer.setPixelRatio(1); // Force 1:1 pixel ratio for capture
             this.renderer.setSize(width, height, false); // false = don't update style to avoid layout thrashing
 
-            // Render with Fixed Camera
-            this.renderer.render(this.scene, this.captureCamera);
+            // Render with viewport camera by default for staged multi-character scenes.
+            this.renderer.render(this.scene, useViewportCamera ? this.camera : this.captureCamera);
             dataURL = this.canvas.toDataURL("image/png");
 
             // Restore renderer
@@ -2740,22 +3445,8 @@ export class PoseViewerCore {
             // Restore state
             if (this.renderer.getPixelRatio() !== oldPixelRatio) this.renderer.setPixelRatio(oldPixelRatio);
             this.scene.background = oldBg;
-
-            this.jointMarkers.forEach(m => m.visible = true);
-            if (this.transform) this.transform.visible = transformVisible;
-            if (this.skeletonHelper) this.skeletonHelper.visible = true;
-            if (this.gridHelper) this.gridHelper.visible = true;
-            if (this.captureFrame) this.captureFrame.visible = true;
-
-            // Restore IK effectors and pole targets visibility
-            if (this.ikController) {
-                for (const [name, effector] of Object.entries(this.ikController.effectors)) {
-                    effector.visible = effectorVisibility[name] ?? false;
-                }
-                for (const [key, pole] of Object.entries(this.ikController.poleTargets)) {
-                    pole.visible = poleVisibility[key] ?? false;
-                }
-            }
+            this.renderer.setClearColor(oldClearColor, oldClearAlpha);
+            visibilityRecords.forEach(record => { record.obj.visible = record.visible; });
 
             // Re-render viewport
             this.renderer.render(this.scene, this.camera);

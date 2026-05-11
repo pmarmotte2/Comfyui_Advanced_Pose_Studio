@@ -1,10 +1,10 @@
 [project]
-name = "vnccs-utils"
-description = "VNCCS - Collection of utility nodes. VNCCS Visual Camera Control for Qwen-Image-Edit-2511-Multiple-Angles LoRa. VNCCS QWEN Detailer - For spot corrections in images of any size. VNCCS Pose Studio - Combined mesh editor and multi-pose generator. "
-version = "0.4.17"
-license = {file = "LICENSE"} 
+name = "advanced-pose-studio"
+description = "Advanced Pose Studio - interactive MakeHuman character staging, pose editing, OpenPose initialization, and multi-angle pose refinement for ComfyUI."
+version = "0.5.0"
+license = {file = "LICENSE"}
 
-dependencies = ["opencv-python", "huggingface_hub", "aiohttp", "kornia", "requests", "torch", "numpy", "Pillow"]
+dependencies = ["aiohttp", "torch", "numpy", "Pillow"]
 
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -14,22 +14,13 @@ classifiers = [
 keywords = ["comfyui", "image-processing", "3d", "pose-estimation"]
 
 [project.urls]
-Repository = "https://github.com/AHEKOT/ComfyUI_VNCCS_Utils"
-#  Used by Comfy Registry https://registry.comfy.org
-Documentation = "https://github.com/AHEKOT/ComfyUI_VNCCS_Utils"
-"Bug Tracker" = "https://github.com/AHEKOT/ComfyUI_VNCCS_Utils/issues"
+Repository = "https://github.com/pmarmotte2/Comfyui_Advanced_Pose_Studio"
+Documentation = "https://github.com/pmarmotte2/Comfyui_Advanced_Pose_Studio"
+"Bug Tracker" = "https://github.com/pmarmotte2/Comfyui_Advanced_Pose_Studio/issues"
 
 [tool.comfy]
-PublisherId = "vnccs"
-DisplayName = "VNCCS - Collection of utility nodes"
-Icon = "https://raw.githubusercontent.com/AHEKOT/ComfyUI_VNCCS/refs/heads/main/images/VNCCS_LOGO.png"
+PublisherId = "advanced-pose-studio"
+DisplayName = "Advanced Pose Studio"
 NodeIds = [
-    "VNCCS_PositionControl",
-    "VNCCS_VisualPositionControl",
-    "VNCCS_QWEN_Detailer",
-    "VNCCS_BBox_Extractor",
-    "VNCCS_ModelManager",
-    "VNCCS_ModelSelector",
-    "VNCCS_PoseStudio"
+    "Advanced_Pose_Studio"
 ]
-

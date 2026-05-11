@@ -1,6 +1,6 @@
-# VNCCS Pose Studio Usage Guide
+# Advanced Pose Studio Usage Guide
 
-The **VNCCS Pose Studio** is a professional 3D posing environment integrated directly into ComfyUI. It allows you to manipulate 3D characters, set up photographic lighting, and manage a library of poses for high-quality control signals.
+The **Advanced Pose Studio** node is a 3D posing environment integrated directly into ComfyUI. It allows you to manipulate MakeHuman character meshes, initialize poses from OpenPose, refine them with editable keypoints, and export viewport-aligned renders.
 
 ## 1. Professional 3-Column Layout
 

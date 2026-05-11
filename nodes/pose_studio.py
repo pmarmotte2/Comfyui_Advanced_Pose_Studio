@@ -1,4 +1,4 @@
-"""VNCCS Pose Studio - Combined mesh editor and multi-pose generator.
+"""Advanced Pose Studio - mesh editor and multi-pose generator.
 
 Combines Character Studio mesh sliders with dynamic pose tabs.
 Each pose stores bone rotations and global model rotation.
@@ -32,6 +32,9 @@ POSE_STUDIO_CACHE = {
     "skeleton": None
 }
 
+POSE_STUDIO_CHARACTER_ROSTER_CACHE = {}
+_CHARACTER_ROSTER_CACHE_MAX = 10
+
 
 def _get_character_data_path():
     """Get the path to CharacterData folder."""
@@ -49,7 +52,7 @@ def _ensure_data_loaded():
     if not os.path.exists(mh_path):
         raise Exception(f"MakeHuman data not found at: {mh_path}")
 
-    print(f"[VNCCS Pose Studio] Loading MakeHuman data from {mh_path}...")
+    print(f"[Advanced Pose Studio] Loading MakeHuman data from {mh_path}...")
 
     # 1. Load Base Mesh
     base_obj_paths = [
@@ -68,7 +71,7 @@ def _ensure_data_loaded():
     POSE_STUDIO_CACHE['targets'] = parser.scan_targets()
     POSE_STUDIO_CACHE['parser'] = parser
     
-    print(f"[VNCCS Pose Studio] Loaded {len(POSE_STUDIO_CACHE['targets'])} targets.")
+    print(f"[Advanced Pose Studio] Loaded {len(POSE_STUDIO_CACHE['targets'])} targets.")
     
     # 3. Load Skeleton (Preference: game_engine > default)
     skel_path = os.path.join(mh_path, "makehuman", "data", "rigs", "game_engine.mhskel")
@@ -76,24 +79,142 @@ def _ensure_data_loaded():
         skel_path = os.path.join(mh_path, "makehuman", "data", "rigs", "default.mhskel")
         
     if os.path.exists(skel_path):
-        print(f"[VNCCS Pose Studio] Loading skeleton from {skel_path}...")
+        print(f"[Advanced Pose Studio] Loading skeleton from {skel_path}...")
         skel = Skeleton()
         skel.fromFile(skel_path, POSE_STUDIO_CACHE['base_mesh'])
         POSE_STUDIO_CACHE['skeleton'] = skel
     else:
-        print(f"[VNCCS Pose Studio] Warning: Default skeleton not found at {skel_path}")
+        print(f"[Advanced Pose Studio] Warning: Default skeleton not found at {skel_path}")
+
+
+def _safe_name_key(value):
+    return "".join(c.lower() for c in str(value or "") if c.isalnum())
+
+
+def _image_to_data_url(path):
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        ext = os.path.splitext(path)[1].lower()
+        mime = "image/png"
+        if ext in [".jpg", ".jpeg"]:
+            mime = "image/jpeg"
+        elif ext == ".webp":
+            mime = "image/webp"
+        return f"data:{mime};base64,{base64.b64encode(raw).decode('utf-8')}"
+    except Exception as e:
+        print(f"[Advanced Pose Studio] Failed to load character image {path}: {e}")
+        return None
+
+
+def _infer_character_mesh(character):
+    text = " ".join(str(character.get(k, "")) for k in ["NAME", "PERSONALITY", "BACKSTORY", "VISUAL", "ATTIRE"]).lower()
+    gender = 0.5
+    if any(token in text for token in [" she ", " her ", " hers ", " female ", " woman ", " girl "]):
+        gender = 0.0
+    if any(token in text for token in [" he ", " him ", " his ", " male ", " man ", " boy "]):
+        gender = 1.0
+
+    age = 25.0
+    import re
+    match = re.search(r"\b(\d{1,2})\s*(?:years? old|yo|y/o)\b", text)
+    if match:
+        age = float(max(1, min(90, int(match.group(1)))))
+
+    return {
+        "age": age,
+        "gender": gender,
+        "weight": 0.5,
+        "muscle": 0.5,
+        "height": 0.5,
+        "breast_size": 0.5,
+        "firmness": 0.5,
+        "penis_len": 0.5,
+        "penis_circ": 0.5,
+        "penis_test": 0.5,
+    }
+
+
+def _find_character_image(characters_dir, character):
+    if not characters_dir or not os.path.isdir(characters_dir):
+        return None
+
+    wanted = {
+        _safe_name_key(character.get("NAME")),
+        _safe_name_key(os.path.splitext(character.get("file", ""))[0]),
+        _safe_name_key(character.get("file")),
+    }
+    exts = {".png", ".jpg", ".jpeg", ".webp"}
+
+    try:
+        for filename in os.listdir(characters_dir):
+            stem, ext = os.path.splitext(filename)
+            if ext.lower() not in exts:
+                continue
+            if _safe_name_key(stem) in wanted:
+                return os.path.join(characters_dir, filename)
+    except Exception as e:
+        print(f"[Advanced Pose Studio] Failed to scan characters_dir: {e}")
+    return None
+
+
+def update_character_roster_cache(unique_id, characters_json):
+    if not unique_id or not characters_json:
+        return
+
+    try:
+        roster = json.loads(characters_json) if isinstance(characters_json, str) else characters_json
+        if not isinstance(roster, dict):
+            return
+
+        characters_dir = roster.get("characters_dir", "")
+        raw_characters = roster.get("characters", [])
+        selected_count = int(roster.get("selected_count", len(raw_characters)))
+        prepared = []
+
+        for character in raw_characters[:max(0, selected_count)]:
+            if not isinstance(character, dict):
+                continue
+            image_path = _find_character_image(characters_dir, character)
+            prepared.append({
+                "name": character.get("NAME") or os.path.splitext(character.get("file", ""))[0] or "Character",
+                "file": character.get("file", ""),
+                "visual": character.get("VISUAL", ""),
+                "attire": character.get("ATTIRE", ""),
+                "mesh": _infer_character_mesh(character),
+                "image": _image_to_data_url(image_path) if image_path else None,
+            })
+
+        POSE_STUDIO_CHARACTER_ROSTER_CACHE[str(unique_id)] = {
+            "characters_dir": characters_dir,
+            "characters": prepared,
+        }
+
+        while len(POSE_STUDIO_CHARACTER_ROSTER_CACHE) > _CHARACTER_ROSTER_CACHE_MAX:
+            oldest = next(iter(POSE_STUDIO_CHARACTER_ROSTER_CACHE))
+            del POSE_STUDIO_CHARACTER_ROSTER_CACHE[oldest]
+    except Exception as e:
+        print(f"[Advanced Pose Studio] Failed to parse characters_json: {e}")
 
 
 # === Main Node Class ===
 
-class VNCCS_PoseStudio:
+class AdvancedPoseStudio:
     """Pose Studio with mesh editing and multiple pose generation."""
     
-    RETURN_TYPES = ("IMAGE", "STRING")
-    RETURN_NAMES = ("images", "lighting_prompt")
-    OUTPUT_IS_LIST = (True, True)
+    RETURN_TYPES = ("IMAGE", "STRING", "IMAGE", "IMAGE", "IMAGE", "IMAGE", "IMAGE")
+    RETURN_NAMES = (
+        "images",
+        "lighting_prompt",
+        "background_only",
+        "character_1",
+        "character_2",
+        "character_3",
+        "character_4",
+    )
+    OUTPUT_IS_LIST = (True, True, False, False, False, False, False)
     FUNCTION = "generate"
-    CATEGORY = "VNCCS/pose"
+    CATEGORY = "Advanced Pose Studio"
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -102,13 +223,16 @@ class VNCCS_PoseStudio:
                 # ALL settings come from widget via pose_data
                 "pose_data": ("STRING", {"multiline": True, "default": "{}"}),
             },
+            "optional": {
+                "characters_json": ("STRING", {"forceInput": True}),
+            },
             "hidden": {
                 "unique_id": "UNIQUE_ID"
             }
         }
 
     @classmethod
-    def IS_CHANGED(cls, pose_data: str = "{}", unique_id: str = None):
+    def IS_CHANGED(cls, pose_data: str = "{}", characters_json: str = "", unique_id: str = None):
         # Force re-execution if Debug Mode is enabled
         try:
             data = json.loads(pose_data)
@@ -117,14 +241,17 @@ class VNCCS_PoseStudio:
                 return float("NaN")
         except:
             pass
-        return pose_data
+        return f"{pose_data}|{characters_json}"
     
     def generate(
         self,
         pose_data: str = "{}",
+        characters_json: str = "",
         unique_id: str = None
     ):
         """Generate rendered mesh images for all poses."""
+        if unique_id and characters_json:
+            update_character_roster_cache(unique_id, characters_json)
         
         # Parse pose data
         try:
@@ -140,11 +267,11 @@ class VNCCS_PoseStudio:
                     import folder_paths
                     
                     # 1. Request capture
-                    PromptServer.instance.send_sync("vnccs_req_pose_sync", {"node_id": unique_id})
+                    PromptServer.instance.send_sync("advanced_pose_studio_req_pose_sync", {"node_id": unique_id})
                     
                     # 2. Wait for file response
                     temp_dir = folder_paths.get_temp_directory()
-                    filepath = os.path.join(temp_dir, f"vnccs_debug_{unique_id}.json")
+                    filepath = os.path.join(temp_dir, f"advanced_pose_studio_sync_{unique_id}.json")
                     
                     # Remove old if exists (only if it's very old, but here we just want fresh)
                     # We don't remove it BEFORE sending the request because the frontend 
@@ -171,7 +298,7 @@ class VNCCS_PoseStudio:
                                         pass
                             time.sleep(0.1)
                 except Exception as e:
-                    print(f"VNCCS Pose Studio Sync Error: {e}")
+                    print(f"Advanced Pose Studio Sync Error: {e}")
             # ---------------------------------------------
             
         except (json.JSONDecodeError, TypeError):
@@ -182,14 +309,16 @@ class VNCCS_PoseStudio:
             capture_id = data.get("capture_id")
             if capture_id:
                 try:
-                    from .. import VNCCS_CAPTURE_CACHE
-                    cached = VNCCS_CAPTURE_CACHE.get(capture_id)
+                    from .. import ADVANCED_POSE_CAPTURE_CACHE
+                    cached = ADVANCED_POSE_CAPTURE_CACHE.get(capture_id)
                     if cached:
                         data["captured_images"] = cached.get("captured_images", [])
                         data["lighting_prompts"] = cached.get("lighting_prompts", [])
-                        print(f"[VNCCS Pose Studio] Loaded {len(data['captured_images'])} captures from LRU cache (id={capture_id})")
+                        data["background_only"] = cached.get("background_only")
+                        data["character_layers"] = cached.get("character_layers", [])
+                        print(f"[Advanced Pose Studio] Loaded {len(data['captured_images'])} captures from LRU cache (id={capture_id})")
                 except Exception as e:
-                    print(f"[VNCCS Pose Studio] Cache fallback failed: {e}")
+                    print(f"[Advanced Pose Studio] Cache fallback failed: {e}")
 
         if not isinstance(data, dict):
             print(f"Pose Studio Error: pose_data is not a dict, got {type(data)}. Using default.")
@@ -221,6 +350,7 @@ class VNCCS_PoseStudio:
         output_mode = export.get("output_mode", "LIST")
         grid_columns = export.get("grid_columns", 2)
         bg_color = export.get("bg_color", [40, 40, 40])  # RGB
+        layer_outputs = self._extract_layer_outputs(data, int(view_width), int(view_height), tuple(bg_color))
         
         poses = data.get("poses", [{}])
         if not poses:
@@ -263,7 +393,7 @@ class VNCCS_PoseStudio:
                 if output_mode == "LIST":
                     # Return list of individual images and prompts
                     tensor_list = [t.unsqueeze(0) for t in tensors]
-                    return (tensor_list, lighting_prompts)
+                    return (tensor_list, lighting_prompts, *layer_outputs)
                 else:
                     grid_img = self._make_grid(rendered_images, grid_columns, tuple(bg_color))
                     np_grid = np.array(grid_img).astype(np.float32) / 255.0
@@ -272,7 +402,7 @@ class VNCCS_PoseStudio:
                     
                     # For grid, return only the first prompt (conceptually the "main" prompt)
                     combined_prompt = lighting_prompts[0] if lighting_prompts else ""
-                    return ([grid_tensor], [combined_prompt])
+                    return ([grid_tensor], [combined_prompt], *layer_outputs)
         
         # === 2. Fallback to Python Rendering ===
         
@@ -318,13 +448,60 @@ class VNCCS_PoseStudio:
             tensor_list = [t.unsqueeze(0) for t in tensors]
             # Fallback prompts (empty strings since python renderer doesn't generate them yet)
             prompts = [""] * len(tensor_list)
-            return (tensor_list, prompts)
+            return (tensor_list, prompts, *layer_outputs)
         else:
             # GRID mode - concatenate into single image
             grid_img = self._make_grid(rendered_images, grid_columns, tuple(bg_color))
             np_grid = np.array(grid_img).astype(np.float32) / 255.0
             grid_tensor = torch.from_numpy(np_grid).unsqueeze(0)
-            return ([grid_tensor], [""])
+            return ([grid_tensor], [""], *layer_outputs)
+
+    def _decode_capture_image(self, b64, mode="RGB"):
+        if not b64 or not isinstance(b64, str):
+            return None
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
+        try:
+            img_data = base64.b64decode(b64)
+            return Image.open(BytesIO(img_data)).convert(mode)
+        except Exception as e:
+            print(f"Pose Studio Error: Failed to decode layer image: {e}")
+            return None
+
+    def _image_to_tensor(self, img):
+        np_img = np.array(img).astype(np.float32) / 255.0
+        return torch.from_numpy(np_img).unsqueeze(0)
+
+    def _blank_tensor(self, width, height, channels=4):
+        width = max(1, int(width or 512))
+        height = max(1, int(height or 512))
+        return torch.zeros((1, height, width, channels), dtype=torch.float32)
+
+    def _extract_layer_outputs(self, data, width, height, bg_color):
+        width = max(1, int(width or 512))
+        height = max(1, int(height or 512))
+
+        bg_img = self._decode_capture_image(data.get("background_only"), "RGB")
+        if bg_img is None:
+            color = tuple(int(c) for c in (bg_color or (40, 40, 40))[:3])
+            bg_img = Image.new("RGB", (width, height), color)
+        background_only = self._image_to_tensor(bg_img)
+
+        character_layers = data.get("character_layers", [])
+        if not isinstance(character_layers, list):
+            character_layers = []
+
+        outputs = []
+        for idx in range(4):
+            layer_img = self._decode_capture_image(character_layers[idx] if idx < len(character_layers) else None, "RGBA")
+            if layer_img is None:
+                outputs.append(self._image_to_tensor(Image.new("RGB", (width, height), (255, 255, 255))))
+            else:
+                white = Image.new("RGBA", layer_img.size, (255, 255, 255, 255))
+                composited = Image.alpha_composite(white, layer_img).convert("RGB")
+                outputs.append(self._image_to_tensor(composited))
+
+        return (background_only, *outputs)
     
     def _apply_pose(self, verts, bones_data, model_rotation):
         """Apply bone rotations (FK) and global rotation to vertices."""
@@ -568,9 +745,9 @@ class VNCCS_PoseStudio:
 
 # Node mappings
 NODE_CLASS_MAPPINGS = {
-    "VNCCS_PoseStudio": VNCCS_PoseStudio
+    "Advanced_Pose_Studio": AdvancedPoseStudio
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "VNCCS_PoseStudio": "VNCCS Pose Studio"
+    "Advanced_Pose_Studio": "Advanced Pose Studio"
 }

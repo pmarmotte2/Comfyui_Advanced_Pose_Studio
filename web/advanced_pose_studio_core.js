@@ -2246,6 +2246,41 @@ export class PoseViewerCore {
         };
     }
 
+    getSceneCharacterRuntimeSnapshot() {
+        this._rememberActiveCharacter();
+        return {
+            activeCharacterId: this.activeCharacterId || null,
+            characters: (this.sceneCharacters || []).map(c => ({
+                id: c.id,
+                pose: this._getPoseForCharacter(c),
+                position: c.skinnedMesh ? [c.skinnedMesh.position.x, c.skinnedMesh.position.y, c.skinnedMesh.position.z] : [0, 0, 0],
+                rotation: c.skinnedMesh ? [c.skinnedMesh.rotation.x, c.skinnedMesh.rotation.y, c.skinnedMesh.rotation.z] : [0, 0, 0],
+                scale: c.skinnedMesh ? [c.skinnedMesh.scale.x, c.skinnedMesh.scale.y, c.skinnedMesh.scale.z] : [1, 1, 1],
+            }))
+        };
+    }
+
+    restoreSceneCharacterRuntimeSnapshot(snapshot) {
+        if (!snapshot?.characters?.length) return false;
+        const activeBefore = this.activeCharacterId;
+        for (const item of snapshot.characters) {
+            const character = this.sceneCharacters?.find(c => c.id === item.id);
+            if (!character) continue;
+            this._activateCharacter(item.id);
+            if (item.pose) this.setPose(item.pose, true);
+            if (character.skinnedMesh) {
+                if (Array.isArray(item.position)) character.skinnedMesh.position.fromArray(item.position);
+                if (Array.isArray(item.rotation)) character.skinnedMesh.rotation.fromArray(item.rotation);
+                if (Array.isArray(item.scale)) character.skinnedMesh.scale.fromArray(item.scale);
+                character.skinnedMesh.updateMatrixWorld(true);
+            }
+            this._rememberActiveCharacter();
+        }
+        this._activateCharacter(snapshot.activeCharacterId || activeBefore);
+        this.requestRender();
+        return true;
+    }
+
     _getPoseForCharacter(character) {
         if (!character?.boneList) return { bones: {} };
         const bones = {};

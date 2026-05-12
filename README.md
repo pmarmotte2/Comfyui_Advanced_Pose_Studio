@@ -7,6 +7,7 @@ Advanced Pose Studio is a standalone ComfyUI custom node for staging MakeHuman-b
 - Node id: `Advanced_Pose_Studio`
 - Display name: `Advanced Pose Studio`
 - Category: `Advanced Pose Studio`
+- Current version: `0.5.1`
 
 ## Inputs
 
@@ -88,3 +89,16 @@ The isolated package keeps only the Pose Studio runtime:
 ## Installation
 
 Place this folder in `ComfyUI/custom_nodes`, install the listed Python requirements if needed, and restart ComfyUI.
+
+## Version History
+
+### 0.5.1
+
+- Preserves per-character pose, position, rotation, and scale during client-side render execution.
+- Stabilizes multi-character restore/save state with canonical character ids.
+- Adds source-only bundled DWPose/OpenPose fallback for pose initialization.
+- Adds single-angle skeleton detection progress messages, including model download percentages when available.
+
+### 0.5.0
+
+- Isolated Advanced Pose Studio as a standalone ComfyUI custom node package.

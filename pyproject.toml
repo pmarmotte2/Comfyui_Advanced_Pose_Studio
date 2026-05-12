@@ -1,7 +1,7 @@
 [project]
 name = "advanced-pose-studio"
 description = "Advanced Pose Studio - interactive MakeHuman character staging, pose editing, OpenPose initialization, and multi-angle pose refinement for ComfyUI."
-version = "0.5.0"
+version = "0.5.1"
 license = {file = "LICENSE"}
 
 dependencies = ["aiohttp", "torch", "numpy", "Pillow"]

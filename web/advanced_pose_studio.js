@@ -5850,69 +5850,77 @@ class PoseStudioWidget {
             if (fullCapture) {
                 const originalTab = this.activeTab;
                 const originalLights = [...this.lightParams]; // Save original lighting
+                const characterSnapshot = this.viewer.getSceneCharacterRuntimeSnapshot?.();
+                const isMultiCharacterScene = (this.viewer.getCharacterSummary?.().length || 0) > 1;
 
-                for (let i = 0; i < this.poses.length; i++) {
-                    this.activeTab = i; // Switch tab for capture
+                try {
+                    for (let i = 0; i < this.poses.length; i++) {
+                        this.activeTab = i; // Switch tab for capture
 
-                    if (isDebug) {
-                        console.log("PoseStudio: Randomizing due to debugMode=true");
-                        // Generate fresh random params for each pose
-                        const debugParams = this.generateDebugParams();
+                        if (isDebug) {
+                            console.log("PoseStudio: Randomizing due to debugMode=true");
+                            // Generate fresh random params for each pose
+                            const debugParams = this.generateDebugParams();
 
-                        // Random Pose logic...
-                        let randomPoseUsed = false;
-                        if (this.libraryPoses && this.libraryPoses.length > 0) {
-                            const randIdx = Math.floor(Math.random() * this.libraryPoses.length);
-                            const poseItem = this.libraryPoses[randIdx];
-                            if (poseItem.data) {
-                                this.viewer.setPose(poseItem.data);
-                                randomPoseUsed = true;
+                            // Random Pose logic...
+                            let randomPoseUsed = false;
+                            if (this.libraryPoses && this.libraryPoses.length > 0) {
+                                const randIdx = Math.floor(Math.random() * this.libraryPoses.length);
+                                const poseItem = this.libraryPoses[randIdx];
+                                if (poseItem.data) {
+                                    this.viewer.setPose(poseItem.data);
+                                    randomPoseUsed = true;
+                                }
                             }
-                        }
-                        if (!randomPoseUsed) this.viewer.setPose(this.poses[i]);
+                            if (!randomPoseUsed) this.viewer.setPose(this.poses[i]);
 
-                        // Model Rotation
-                        const rArray = this.viewer.isInitialized() ? this.viewer.getPose().modelRotation : [0, 0, 0];
-                        const currentRot = { x: rArray[0], y: rArray[1], z: rArray[2] };
-                        this.viewer.setModelRotation(currentRot.x, debugParams.modelYRotation, currentRot.z);
+                            // Model Rotation
+                            const rArray = this.viewer.isInitialized() ? this.viewer.getPose().modelRotation : [0, 0, 0];
+                            const currentRot = { x: rArray[0], y: rArray[1], z: rArray[2] };
+                            this.viewer.setModelRotation(currentRot.x, debugParams.modelYRotation, currentRot.z);
 
-                        // Lighting
-                        if (isOriginalLighting) {
-                            this.viewer.updateLights([{ type: 'ambient', color: '#ffffff', intensity: 1.0 }]);
-                        } else if (debugParams.lights) {
-                            this.viewer.updateLights(debugParams.lights);
-                        }
+                            // Lighting
+                            if (isOriginalLighting) {
+                                this.viewer.updateLights([{ type: 'ambient', color: '#ffffff', intensity: 1.0 }]);
+                            } else if (debugParams.lights) {
+                                this.viewer.updateLights(debugParams.lights);
+                            }
 
-                        // Capture
-                        this.poseCaptures[i] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY, { useViewportCamera: true });
+                            // Capture
+                            this.poseCaptures[i] = this.viewer.capture(w, h, debugParams.zoom, debugParams.bgColor, debugParams.offsetX, debugParams.offsetY, { useViewportCamera: true });
 
-                        // Prompt
-                        const promptLights = isOriginalLighting ? [{ type: 'ambient', color: '#ffffff', intensity: 1.0 }] : (debugParams.lights || originalLights);
-                        this.lightingPrompts[i] = this.generatePromptFromLights(promptLights);
-                    } else {
-                        // Normal mode
-                        this.viewer.setPose(this.poses[i]);
-                        const poseCam = this.poses[i].cameraParams || {};
-                        const z = poseCam.zoom || this.exportParams.cam_zoom || 1.0;
-                        const oX = (poseCam.offset_x !== undefined ? poseCam.offset_x : this.exportParams.cam_offset_x) || 0;
-                        const oY = (poseCam.offset_y !== undefined ? poseCam.offset_y : this.exportParams.cam_offset_y) || 0;
-
-                        // Lighting Toggle
-                        if (isOriginalLighting) {
-                            this.viewer.updateLights([{ type: 'ambient', color: '#ffffff', intensity: 1.0 }]);
+                            // Prompt
+                            const promptLights = isOriginalLighting ? [{ type: 'ambient', color: '#ffffff', intensity: 1.0 }] : (debugParams.lights || originalLights);
+                            this.lightingPrompts[i] = this.generatePromptFromLights(promptLights);
                         } else {
-                            this.viewer.updateLights(this.lightParams);
-                        }
+                            // Normal mode
+                            if (!isMultiCharacterScene) {
+                                this.viewer.setPose(this.poses[i]);
+                            }
+                            const poseCam = this.poses[i].cameraParams || {};
+                            const z = poseCam.zoom || this.exportParams.cam_zoom || 1.0;
+                            const oX = (poseCam.offset_x !== undefined ? poseCam.offset_x : this.exportParams.cam_offset_x) || 0;
+                            const oY = (poseCam.offset_y !== undefined ? poseCam.offset_y : this.exportParams.cam_offset_y) || 0;
 
-                        this.poseCaptures[i] = this.viewer.capture(w, h, z, bg, oX, oY, { useViewportCamera: true });
-                        this.lightingPrompts[i] = this.generatePromptFromLights(isOriginalLighting ? [] : this.lightParams);
+                            // Lighting Toggle
+                            if (isOriginalLighting) {
+                                this.viewer.updateLights([{ type: 'ambient', color: '#ffffff', intensity: 1.0 }]);
+                            } else {
+                                this.viewer.updateLights(this.lightParams);
+                            }
+
+                            this.poseCaptures[i] = this.viewer.capture(w, h, z, bg, oX, oY, { useViewportCamera: true });
+                            this.lightingPrompts[i] = this.generatePromptFromLights(isOriginalLighting ? [] : this.lightParams);
+                        }
                     }
+                } finally {
+                    if (characterSnapshot) this.viewer.restoreSceneCharacterRuntimeSnapshot?.(characterSnapshot);
                 }
 
                 // Restore original state and UI
                 this.viewer.updateLights(userLights);
                 this.activeTab = originalTab;
-                this.viewer.setPose(this.poses[this.activeTab]);
+                if (!characterSnapshot) this.viewer.setPose(this.poses[this.activeTab]);
                 this.updateTabs(); // Ensure UI reflects correct tab
                 this.updateRotationSliders();
 
